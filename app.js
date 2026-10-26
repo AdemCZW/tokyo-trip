@@ -8,6 +8,66 @@
   const TOKYO = [35.6812, 139.7671];
   const NDAYS = T.days.length;
 
+  /* ---------- 雲端同步：購物紀錄、待辦打勾、出發日（需編輯密碼） ---------- */
+  const SYNC = { ledger: 'tokyo.ledger', checks: 'tokyo.checks', start: 'tokyo.start' };
+  const cloudKey = () => localStorage.getItem('tokyo.editkey') || '';
+  const cloudTimers = {};
+  function cloudPush(k) {
+    try { localStorage.setItem('tokyo.u.' + k, String(Date.now())); } catch { return; }
+    if (!cloudKey()) return;
+    clearTimeout(cloudTimers[k]);
+    cloudTimers[k] = setTimeout(() => cloudSend(k).catch(() => {}), 700);
+  }
+  async function cloudSend(k) {
+    const raw = localStorage.getItem(SYNC[k]);
+    const v = k === 'start' ? raw || '' : JSON.parse(raw || (k === 'ledger' ? '[]' : '{}'));
+    const r = await fetch('/api/store?k=' + k, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-edit-key': cloudKey() }, body: JSON.stringify({ v, u: +localStorage.getItem('tokyo.u.' + k) || Date.now() }) });
+    if (r.status === 401) localStorage.removeItem('tokyo.editkey');
+    return r.ok;
+  }
+  async function cloudPull() {
+    if (!cloudKey()) return;
+    let changed = false;
+    for (const k of Object.keys(SYNC)) {
+      try {
+        const r = await fetch('/api/store?k=' + k, { headers: { 'x-edit-key': cloudKey() }, cache: 'no-store' });
+        if (r.status === 401) { localStorage.removeItem('tokyo.editkey'); renderCloudBar(); return; }
+        if (!r.ok) continue;
+        const c = await r.json();
+        const lu = +localStorage.getItem('tokyo.u.' + k) || 0;
+        if (c.u && c.u > lu) {
+          localStorage.setItem(SYNC[k], k === 'start' ? c.v : JSON.stringify(c.v));
+          localStorage.setItem('tokyo.u.' + k, String(c.u));
+          changed = true;
+        } else if (lu > (c.u || 0) || (!c.u && localStorage.getItem(SYNC[k]))) {
+          if (!lu) localStorage.setItem('tokyo.u.' + k, String(Date.now()));
+          await cloudSend(k);
+        }
+      } catch { /* 離線：下次再同步 */ }
+    }
+    if (changed && !sessionStorage.getItem('tokyo.pulled')) { sessionStorage.setItem('tokyo.pulled', '1'); location.reload(); }
+    else sessionStorage.removeItem('tokyo.pulled');
+  }
+  function renderCloudBar() {
+    const el = $('#cloudBar'); if (!el) return;
+    const on = !!cloudKey();
+    el.innerHTML = `<span class="cb-t">${on ? '☁️ 雲端同步已開啟' : '☁️ 雲端同步未開啟'}<small>${on ? '購物紀錄、待辦打勾、出發日、行程修改都會同步，重新整理不會消失' : '輸入編輯密碼後，購物紀錄、待辦打勾、出發日會存到雲端'}</small></span>
+      <button class="btn sm" id="cloudBtn" type="button">${on ? '關閉' : '開啟'}</button>`;
+    $('#cloudBtn').addEventListener('click', async () => {
+      if (on) { localStorage.removeItem('tokyo.editkey'); renderCloudBar(); return; }
+      const key = (prompt('輸入編輯密碼') || '').trim();
+      if (!key) return;
+      try {
+        const r = await fetch('/api/store?k=checks', { headers: { 'x-edit-key': key }, cache: 'no-store' });
+        if (r.status === 401) return alert('編輯密碼不正確');
+        if (!r.ok) return alert('這個網址不支援雲端同步（請用 tokyo-trip-2pc.pages.dev）');
+        localStorage.setItem('tokyo.editkey', key);
+        renderCloudBar();
+        cloudPull();
+      } catch { alert('網路有問題，稍後再試'); }
+    });
+  }
+
   /* ---------- 行程編輯：雲端存檔（Cloudflare KV），本機留一份快取 ---------- */
   const EDITS_KEY = 'tokyo.edits';
   const escH = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -66,13 +126,14 @@
 
   const store = {
     get start() { return localStorage.getItem('tokyo.start') || T.start || ''; },
-    set start(v) { localStorage.setItem('tokyo.start', v); },
+    set start(v) { localStorage.setItem('tokyo.start', v); cloudPush('start'); },
   };
   const addDays = (iso, n) => {
     const d = new Date(iso + 'T12:00:00');
     d.setDate(d.getDate() + n);
     return d;
   };
+  const fmtShort = (d) => `${d.getMonth() + 1}/${d.getDate()} ${'日一二三四五六'[d.getDay()]}`;
   const fmtDay = (d) => d.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
   const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -252,7 +313,7 @@
       if (days > 0 && !cdEl.dataset.done) { cdEl.dataset.done = 1; countUp(cdEl, days, (x) => `${Math.round(x)} 天`); }
       else if (days > 0) cdEl.textContent = `${days} 天`;
       else cdEl.textContent = days > -NDAYS ? '旅行中' : '已結束';
-      $('#cdS').textContent = `${fmtDay(addDays(s, 0))} – ${fmtDay(addDays(s, NDAYS - 1))}`;
+      $('#cdS').textContent = `${fmtShort(addDays(s, 0))} – ${fmtShort(addDays(s, NDAYS - 1))}`;
     } else {
       $('#cd').textContent = '—';
       $('#cdS').textContent = '選出發日';
@@ -310,9 +371,9 @@
     $('#dayBody').innerHTML = `
       <div class="day-intro"><h2 class="h2" style="margin-top:0">${d.title}</h2><p>${d.summary}</p></div>
       <div class="day-actions">
-        ${route ? `<a class="btn primary sm" target="_blank" rel="noopener" href="${route}">➜ 整天路線導航</a>` : ''}
+        ${route ? `<a class="btn primary sm" target="_blank" rel="noopener" href="${route}">➜ 整天導航</a>` : ''}
+        <button class="btn sm" id="editDay" type="button">✏️ 編輯</button>
         ${pills(d.tags)}
-        <button class="btn sm" id="editDay" type="button">✏️ 編輯這天</button>
       </div>
       <ol class="tl">${d.stops.map((s) => {
         const idx = s.lat ? ++n : 0;
@@ -465,7 +526,7 @@
       if (days.length) {
         $('#wxTrip').innerHTML = days.map((k) => {
           const [i2] = WMO(w.daily.weather_code[k]);
-          return `<div class="wxm"><span class="dd">${fmtDay(new Date(w.daily.time[k] + 'T12:00:00'))}</span><span class="ic">${i2}</span>
+          return `<div class="wxm"><span class="dd">${fmtShort(new Date(w.daily.time[k] + 'T12:00:00'))}</span><span class="ic">${i2}</span>
             <b>${Math.round(w.daily.temperature_2m_max[k])}°</b><span class="lo">${Math.round(w.daily.temperature_2m_min[k])}°</span><span class="rr">💧${w.daily.precipitation_probability_max[k] ?? '-'}%</span></div>`;
         }).join('');
         $('#wxNowS').textContent = `東京現在 ${ic} ${Math.round(w.current.temperature_2m)}°（${txt}）`;
@@ -482,7 +543,7 @@
 
   /* ---------- 總覽：待辦／注意事項／行李（打勾存在 localStorage） ---------- */
   const checks = JSON.parse(localStorage.getItem('tokyo.checks') || '{}');
-  const saveChecks = () => localStorage.setItem('tokyo.checks', JSON.stringify(checks));
+  const saveChecks = () => { localStorage.setItem('tokyo.checks', JSON.stringify(checks)); cloudPush('checks'); };
   const linkBtns = (links = []) => links.map(([label, url]) =>
     `<a class="navlink ${label.startsWith('🎫') || label.startsWith('📝') ? 'book' : 'ghost'}" target="_blank" rel="noopener" href="${url}">${label}</a>`).join('');
   function renderTodo() {
@@ -588,11 +649,11 @@
     $$('#taxCats .chip').forEach((b) => b.addEventListener('click', () => { taxCat = b.dataset.cat; renderTaxPane(); }));
   }
 
-  // ---- 購物紀錄：存在這台裝置的 localStorage，不會上傳 ----
+  // ---- 購物紀錄：存在這台裝置的 localStorage；開啟雲端同步後會同步到 Cloudflare KV（需密碼） ----
   const LEDGER_KEY = 'tokyo.ledger';
   let ledger = [];
   try { ledger = JSON.parse(localStorage.getItem(LEDGER_KEY) || '[]'); } catch { ledger = []; }
-  const saveLedger = () => { try { localStorage.setItem(LEDGER_KEY, JSON.stringify(ledger)); } catch { /* 無痕模式存不了就只留在記憶體 */ } };
+  const saveLedger = () => { try { localStorage.setItem(LEDGER_KEY, JSON.stringify(ledger)); cloudPush('ledger'); } catch { /* 無痕模式存不了就只留在記憶體 */ } };
   const tripDates = () => (store.start ? Array.from({ length: NDAYS }, (_, k) => addDays(store.start, k)) : []);
 
   function buildLedgerForm() {
@@ -793,6 +854,8 @@
   renderWeather();
   loadFx();
   syncCloud();
+  renderCloudBar();
+  cloudPull();
   const start = PAGES.findIndex((p) => '#' + p.id === location.hash);
   reveal();
   requestAnimationFrame(() => { goTo(start < 0 ? 0 : start, false); moveInd(); });

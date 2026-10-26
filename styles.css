@@ -663,3 +663,23 @@ select.in { appearance: none; -webkit-appearance: none; }
 .ed-note { width: 100%; resize: vertical; font: inherit; }
 .ed-msg { min-height: 1.4em; font-size: 13px; }
 #editDay { margin-left: auto; }
+
+/* ---- 雲端同步列、手機整理 ---- */
+.cloudbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 14px 0 0; padding: 10px 14px; border-radius: 16px; background: var(--glass); border: 1px solid var(--line); }
+.cloudbar .cb-t { display: grid; gap: 2px; font-size: 14px; font-weight: 600; min-width: 0; }
+.cloudbar small { font-size: 12px; font-weight: 400; color: var(--muted); line-height: 1.4; }
+.cloudbar .btn { flex: none; white-space: nowrap; }
+.btn, .chip, .seg button { white-space: nowrap; }
+.wxm .dd { white-space: nowrap; }
+@media (max-width: 560px) {
+  .day-actions { gap: 6px; }
+  .day-actions .btn { padding: 7px 12px; }
+  #editDay { margin-left: 0; }
+  .day-actions .pill, .day-actions .tag { font-size: 12px; }
+  .ed-top { flex-wrap: wrap; }
+  .ed-top .ed-n { flex-basis: calc(100% - 90px); }
+  .start-row { flex-wrap: wrap; gap: 10px; }
+  .start-row .field { flex: 1 1 100%; justify-content: space-between; }
+  .start-row .btn { flex: 1 1 100%; justify-content: center; }
+  .stats { gap: 10px; }
+}
