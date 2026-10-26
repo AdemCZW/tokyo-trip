@@ -652,3 +652,14 @@ select.in { appearance: none; -webkit-appearance: none; }
   .tabbar a { font-size: 10px; }
   .tabbar svg { width: 21px; height: 21px; }
 }
+
+/* ---- 行程編輯器 ---- */
+.ed-list { display: grid; gap: 10px; margin: 14px 0; }
+.ed-row { padding: 10px; border-radius: 14px; border: 1px solid var(--border, rgba(255,255,255,.14)); background: var(--glass, rgba(255,255,255,.06)); display: grid; gap: 8px; }
+.ed-top { display: flex; gap: 6px; align-items: center; }
+.ed-top .ed-t { width: 74px; flex: none; }
+.ed-top .ed-n { flex: 1; min-width: 0; }
+.ed-top .btn { padding: 7px 10px; flex: none; }
+.ed-note { width: 100%; resize: vertical; font: inherit; }
+.ed-msg { min-height: 1.4em; font-size: 13px; }
+#editDay { margin-left: auto; }

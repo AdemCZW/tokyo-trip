@@ -7,6 +7,34 @@
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
   const TOKYO = [35.6812, 139.7671];
   const NDAYS = T.days.length;
+
+  /* ---------- 行程編輯：雲端存檔（Cloudflare KV），本機留一份快取 ---------- */
+  const EDITS_KEY = 'tokyo.edits';
+  const escH = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const ORIG = T.days.map((d) => d.stops.map((s) => ({ ...s })));
+  function applyEdits(doc) {
+    Object.entries((doc && doc.days) || {}).forEach(([i, e]) => {
+      const d = T.days[i];
+      if (!d || !Array.isArray(e.stops)) return;
+      d.stops = e.stops.filter((x) => x && typeof x === 'object' && !x.del).map((x) => {
+        const base = x.orig >= 0 && ORIG[i][x.orig] ? { ...ORIG[i][x.orig] } : { kind: 'sight' };
+        base._o = x.orig >= 0 ? x.orig : -1;
+        base.t = escH(x.t);
+        base.name = escH(x.name);
+        if (x.it !== undefined) base.it = escH(x.it);
+        if (x.noteText !== undefined) base.note = escH(x.noteText).replace(/\n/g, '<br>');
+        if (base._o < 0) { base.q = x.q || x.name; base.it = base.it || ''; }
+        return base;
+      });
+    });
+  }
+  let cachedEdits = {};
+  try { cachedEdits = JSON.parse(localStorage.getItem(EDITS_KEY) || '{}'); } catch { cachedEdits = {}; }
+  if (!cachedEdits || typeof cachedEdits !== 'object') cachedEdits = {};
+  try { applyEdits(cachedEdits); } catch {
+    localStorage.removeItem(EDITS_KEY); cachedEdits = {};
+    T.days.forEach((d, i) => { d.stops = ORIG[i].map((x) => ({ ...x })); });
+  }
   const DAY_COLORS = ['#ff453a', '#ff9f0a', '#32ade6', '#0a84ff', '#5e5ce6', '#bf5af2', '#a2845e']; // Apple 系統色，七天各一色
   const FOOD_COLOR = '#30b158';
   const GEM_COLOR = '#ff2d92';
@@ -284,6 +312,7 @@
       <div class="day-actions">
         ${route ? `<a class="btn primary sm" target="_blank" rel="noopener" href="${route}">➜ 整天路線導航</a>` : ''}
         ${pills(d.tags)}
+        <button class="btn sm" id="editDay" type="button">✏️ 編輯這天</button>
       </div>
       <ol class="tl">${d.stops.map((s) => {
         const idx = s.lat ? ++n : 0;
@@ -295,6 +324,7 @@
           </div></li>`;
       }).join('')}</ol>`;
     $('#daySide').innerHTML = `<h3>${d.side.title}</h3>${list(d.side.items)}`;
+    $('#editDay').addEventListener('click', () => openEditor(i));
 
     if (!dayMap) dayMap = makeMap('dayMap');
     if (dayLayer) dayLayer.remove();
@@ -663,6 +693,85 @@
     if (clr) clr.addEventListener('click', () => { if (confirm('清空全部購物紀錄？這個動作無法復原。')) { ledger = []; saveLedger(); renderLedger(); } });
   }
 
+
+  /* ---------- 行程編輯器 ---------- */
+  const plain = (h) => String(h || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  function openEditor(i) {
+    const d = T.days[i];
+    let rows = d.stops.map((s, k) => ({ orig: s._o ?? k, t: s.t || '', name: plain(s.name), it: plain(s.it), note: plain(s.note), noteText: ((s._o ?? k) < 0 || plain(s.note) !== plain((ORIG[i][s._o ?? k] || {}).note)) ? plain(s.note) : undefined, q: s.q }));
+    const body = $('#dayBody');
+    const paint = () => {
+      body.innerHTML = `<div class="day-intro"><h2 class="h2" style="margin-top:0">✏️ 編輯 Day ${i + 1}</h2>
+        <p>改時間、名稱、備註，用 ↑↓ 調順序，🗑 刪掉。新增的景點沒有地圖位置，導航會用名稱搜尋。存檔需要編輯密碼，存好後兩支手機重新整理都看得到。</p></div>
+        <div class="ed-list">${rows.map((r, k) => `<div class="ed-row" data-k="${k}">
+          <div class="ed-top"><input class="in ed-t" value="${escH(r.t)}" placeholder="時間" maxlength="12" aria-label="時間">
+            <input class="in ed-n" value="${escH(r.name)}" placeholder="名稱" maxlength="80" aria-label="名稱">
+            <button class="btn sm" data-a="up" ${k ? '' : 'disabled'} aria-label="上移">↑</button>
+            <button class="btn sm" data-a="dn" ${k < rows.length - 1 ? '' : 'disabled'} aria-label="下移">↓</button>
+            <button class="btn sm" data-a="rm" aria-label="刪除">🗑</button></div>
+          <textarea class="in ed-note" rows="2" placeholder="備註" maxlength="1500" aria-label="備註">${escH(r.note)}</textarea></div>`).join('')}</div>
+        <div class="day-actions"><button class="btn sm" data-a="add">＋ 新增景點</button>
+          <button class="btn primary sm" data-a="save">💾 存檔</button>
+          <button class="btn sm" data-a="cancel">取消</button>
+          <button class="btn sm" data-a="reset">還原成原始行程</button></div><p class="ed-msg" id="edMsg" role="status"></p>`;
+    };
+    const sync = () => $$('.ed-row', body).forEach((el) => {
+      const r = rows[+el.dataset.k];
+      r.t = $('.ed-t', el).value.trim(); r.name = $('.ed-n', el).value.trim();
+      const nv = $('.ed-note', el).value;
+      if (nv !== r.note) { r.note = nv; r.noteText = nv; }
+    });
+    const msg = (t, bad) => { const m = $('#edMsg'); m.textContent = t; m.style.color = bad ? 'var(--danger, #ff453a)' : ''; };
+    const send = async (payload) => {
+      let key = localStorage.getItem('tokyo.editkey') || '';
+      if (!key) { key = (prompt('輸入編輯密碼') || '').trim(); if (!key) { msg('需要編輯密碼才能存檔', true); return false; } }
+      msg('儲存中…');
+      try {
+        const r = await fetch('/api/plan', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-edit-key': key }, body: JSON.stringify({ day: i, ...payload }) });
+        if (r.status === 401) { localStorage.removeItem('tokyo.editkey'); msg('編輯密碼不正確', true); return false; }
+        if (!r.ok) { msg('存檔失敗（' + r.status + '），這個網址可能不支援雲端存檔', true); return false; }
+        const saved = await r.json();
+        try { localStorage.setItem('tokyo.editkey', key); localStorage.setItem(EDITS_KEY, JSON.stringify(saved)); } catch { /* 無痕模式：已存到雲端，只是沒快取 */ }
+        return true;
+      } catch { msg('網路有問題，沒存到', true); return false; }
+    };
+    body.onclick = async (e) => {
+      const b = e.target.closest('[data-a]'); if (!b) return;
+      const a = b.dataset.a, k = +(b.closest('.ed-row')?.dataset.k ?? -1);
+      if (a === 'cancel') { body.onclick = null; renderDay(i); return; }
+      sync();
+      if (a === 'up' || a === 'dn') { const j = a === 'up' ? k - 1 : k + 1; [rows[k], rows[j]] = [rows[j], rows[k]]; paint(); }
+      else if (a === 'rm') { rows.splice(k, 1); paint(); }
+      else if (a === 'add') { rows.push({ orig: -1, t: '', name: '', it: '', note: '' }); paint(); $$('.ed-n', body).at(-1).focus(); }
+      else if (a === 'reset') {
+        if (!confirm('這天的修改全部清掉，還原成原本的行程？')) return;
+        if (await send({ reset: true })) location.reload();
+      } else if (a === 'save') {
+        const ok = rows.filter((r) => r.name);
+        if (!ok.length) return msg('至少要留一個景點', true);
+        const stops = ok.map((r) => ({ orig: r.orig, t: r.t, name: r.name, it: r.it || undefined, noteText: r.noteText, q: r.orig < 0 ? r.name : undefined }));
+        if (await send({ stops })) location.reload();
+      }
+    };
+    paint();
+    body.scrollIntoView({ block: 'nearest' });
+  }
+  async function syncCloud() {
+    try {
+      const r = await fetch('/api/plan', { cache: 'no-store' });
+      if (!r.ok) return;
+      const t = await r.text();
+      const doc = JSON.parse(t);
+      const now = JSON.stringify({ days: doc.days || {} });
+      const was = JSON.stringify({ days: cachedEdits.days || {} });
+      if (now !== was && !sessionStorage.getItem('tokyo.syncing')) {
+        localStorage.setItem(EDITS_KEY, t);
+        sessionStorage.setItem('tokyo.syncing', '1');
+        location.reload();
+      } else sessionStorage.removeItem('tokyo.syncing');
+    } catch { /* 離線或不在 Cloudflare 網址：用本機快取 */ }
+  }
+
   /* ---------- 啟動 ---------- */
   tick();
   setInterval(tick, 15000);
@@ -683,6 +792,7 @@
   renderBookings();
   renderWeather();
   loadFx();
+  syncCloud();
   const start = PAGES.findIndex((p) => '#' + p.id === location.hash);
   reveal();
   requestAnimationFrame(() => { goTo(start < 0 ? 0 : start, false); moveInd(); });
