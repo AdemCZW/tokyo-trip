@@ -91,6 +91,7 @@
         base.t = escH(x.t);
         base.name = escH(x.name);
         if (x.it !== undefined) base.it = escH(x.it);
+        if (Number.isFinite(x.stay)) { base.stay = x.stay; base.travel = x.travel || 0; base.tm = x.tm; }
         if (x.noteText !== undefined) base.note = escH(x.noteText).replace(/\n/g, '<br>');
         if (base._o < 0) { base.it = base.it || ''; if (x.lat) { base.lat = x.lat; base.lng = x.lng; base.gname = x.gname; } else base.q = x.q || x.name; }
         return base;
@@ -390,7 +391,7 @@
           <div class="stop ${s.kind || ''}" style="--c:${c}" data-idx="${idx}">
             <div class="row1"><span class="nm">${idx ? `${idx}. ` : ''}${s.name}</span>${s.it ? `<span class="it">${s.it}</span>` : ''}</div>
             ${s.note ? `<div class="note">${s.note}</div>` : ''}
-            ${s.tags || s.lat || s.q ? `<div class="meta">${pills(s.tags)}<span class="go">${bookBtn(s.book)}${navBtn(s, s.mode || d.mode || 'walking')}</span></div>` : ''}
+            ${s.tags || s.lat || s.q || s.stay ? `<div class="meta">${pills(s.tags)}${s.stay ? `<span class="pill">停留 ${fmtDur(s.stay)}</span>` : ''}<span class="go">${bookBtn(s.book)}${navBtn(s, s.mode || d.mode || 'walking')}</span></div>` : ''}
           </div></li>`;
       }).join('')}</ol>`;
     $('#daySide').innerHTML = `<h3>${d.side.title}</h3>${list(d.side.items)}`;
@@ -775,35 +776,86 @@
 
   /* ---------- 行程編輯器 ---------- */
   const plain = (h) => String(h || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  const toMin = (t) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t ?? '').trim()); return m ? +m[1] * 60 + +m[2] : null; };
+  const fromMin = (n) => { n = Math.max(0, Math.min(1439, Math.round(n))); return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`; };
+  const fmtDur = (m) => (m < 60 ? `${m} 分` : `${Math.floor(m / 60)} 小時${m % 60 ? ` ${m % 60} 分` : ''}`);
+  // 兩點之間的交通分鐘數：直線距離 ×1.3 換算（≤15 分鐘步行，其餘搭電車），只是估算，可手動改
+  function estTravel(a, b) {
+    if (!a || !b || !a.lat || !b.lat) return 15;
+    const rad = Math.PI / 180, dLa = (b.lat - a.lat) * rad, dLn = (b.lng - a.lng) * rad;
+    const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLn / 2) ** 2;
+    const d = 2 * 6371 * Math.asin(Math.sqrt(h)) * 1.3;
+    const walk = (d / 4.8) * 60;
+    const m = walk <= 15 ? walk : 12 + (d / (d > 30 ? 75 : d > 15 ? 35 : 25)) * 60;
+    return Math.min(180, Math.max(5, Math.round(m / 5) * 5));
+  }
+  const STAY_OPTS = [5, 10, 15, 20, 25, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240, 300, 360, 480];
+  const TRAVEL_OPTS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 75, 90, 105, 120, 150, 180];
+  const selOpts = (list, v, fmt) => [...new Set([...list, v])].sort((x, y) => x - y).map((m) => `<option value="${m}" ${m === v ? 'selected' : ''}>${fmt(m)}</option>`).join('');
+  const timeOpts = (v) => {
+    const cur = toMin(v), set = [];
+    for (let m = 240; m < 1440; m += 5) set.push(m);
+    if (cur !== null && !set.includes(cur)) { set.push(cur); set.sort((x, y) => x - y); }
+    const raw = v && cur === null ? `<option value="${escH(v)}" selected>${escH(v)}</option>` : '';
+    return `<option value="" ${v ? '' : 'selected'}>--:--</option>${raw}` + set.map((m) => `<option value="${fromMin(m)}" ${cur === m ? 'selected' : ''}>${fromMin(m)}</option>`).join('');
+  };
+
   function openEditor(i) {
     const d = T.days[i];
-    let rows = d.stops.map((s, k) => ({ orig: s._o ?? k, t: s.t || '', name: plain(s.name), it: plain(s.it), note: plain(s.note), lat: (s._o ?? k) < 0 ? s.lat : undefined, lng: (s._o ?? k) < 0 ? s.lng : undefined, gname: (s._o ?? k) < 0 ? s.gname : undefined, noteText: ((s._o ?? k) < 0 || plain(s.note) !== plain((ORIG[i][s._o ?? k] || {}).note)) ? plain(s.note) : undefined, q: s.q }));
+    let rows = d.stops.map((s, k) => ({
+      orig: s._o ?? k, t: s.t || '', name: plain(s.name), it: plain(s.it), note: plain(s.note), q: s.q,
+      noteText: ((s._o ?? k) < 0 || plain(s.note) !== plain((ORIG[i][s._o ?? k] || {}).note)) ? plain(s.note) : undefined,
+      lat: s.lat, lng: s.lng, gname: s.gname, stay: s.stay, travel: s.travel, tm: s.tm,
+    }));
+    // 舊資料沒有「停留／交通」：由原本兩站的時間差拆成「交通估算」＋「停留」，總時間不變
+    rows.forEach((r, k) => {
+      const nx = rows[k + 1];
+      if (!nx) { r.travel = 0; r.stay = r.stay || 60; return; }
+      if (Number.isFinite(r.stay) && Number.isFinite(r.travel)) return;
+      const gap = toMin(nx.t) !== null && toMin(r.t) !== null ? toMin(nx.t) - toMin(r.t) : null;
+      const est = estTravel(r, nx);
+      if (gap !== null && gap > 0) { r.travel = Math.min(est, Math.max(0, gap - 5)); r.stay = gap - r.travel; }
+      else { r.travel = est; r.stay = 60; }
+    });
     const body = $('#dayBody');
-    const paint = () => {
+    const auto = () => $('#edCas')?.checked !== false;
+    const reest = (j) => { if (j >= 0 && j < rows.length - 1 && !rows[j].tm) rows[j].travel = estTravel(rows[j], rows[j + 1]); };
+    const chain = (from) => {
+      if (!auto()) return;
+      for (let j = Math.max(0, from); j < rows.length - 1; j++) {
+        const a = toMin(rows[j].t);
+        if (a !== null) rows[j + 1].t = fromMin(a + rows[j].stay + rows[j].travel);
+      }
+    };
+    const msg = (t, bad) => { const m = $('#edMsg'); if (!m) return; m.textContent = t; m.style.color = bad ? 'var(--danger, #ff453a)' : ''; };
+    const paint = (note) => {
       body.innerHTML = `<div class="day-intro"><h2 class="h2" style="margin-top:0">✏️ 編輯 Day ${i + 1}</h2>
-        <p>改時間、名稱、備註，用 ↑↓ 調順序，🗑 刪掉；按 ＋ 可在那一站後面<b>插入一個行程</b>，後面的行程會自動順延。新增的景點沒有地圖位置，導航會用名稱搜尋。存檔需要編輯密碼，存好後兩支手機重新整理都看得到。</p></div>
-        <label class="ed-cas"><input type="checkbox" id="edCas" ${localStorage.getItem('tokyo.cascade') === '0' ? '' : 'checked'}> 改時間時，<b>後面的行程一起平移</b></label>
-        <div class="ed-list">${rows.map((r, k) => `<div class="ed-row" data-k="${k}">
-          <div class="ed-top"><input class="in ed-t" value="${escH(r.t)}" placeholder="時間" maxlength="12" aria-label="時間">
-            <input class="in ed-n" value="${escH(r.name)}" placeholder="名稱" maxlength="80" aria-label="名稱">
-            <button class="btn sm" data-a="up" ${k ? '' : 'disabled'} aria-label="上移">↑</button>
-            <button class="btn sm" data-a="dn" ${k < rows.length - 1 ? '' : 'disabled'} aria-label="下移">↓</button>
-            <button class="btn sm" data-a="rm" aria-label="刪除">🗑</button>
-            <button class="btn sm" data-a="ins" aria-label="在這一站後面插入一個行程" title="在後面插入">＋</button></div>
-          ${r.ins ? `<label class="ed-dur">停留約 <input class="in ed-d" type="number" min="0" max="600" step="5" value="${r.dur}" aria-label="停留分鐘"> 分鐘（後面的行程會順延）</label>` : ''}
-          <textarea class="in ed-note" rows="2" placeholder="備註" maxlength="1500" aria-label="備註">${escH(r.note)}</textarea></div>`).join('')}</div>
-        <div class="day-actions"><button class="btn sm" data-a="add">＋ 新增景點</button>
+        <p>每一站有「開始時間、停留、到下一站的交通」，改任何一個，<b>後面的時間會自動重算</b>。新增、刪除、換順序也一樣。交通時間是用距離估的，可以自己改。</p></div>
+        <label class="ed-cas"><input type="checkbox" id="edCas" ${localStorage.getItem('tokyo.cascade') === '0' ? '' : 'checked'}> 自動重算後面的時間（停留＋交通）</label>
+        <div class="ed-list">${rows.map((r, k) => {
+          const end = toMin(r.t) !== null ? fromMin(toMin(r.t) + r.stay) : '';
+          return `<div class="ed-row" data-k="${k}">
+          <div class="ed-top"><select class="in ed-t" aria-label="開始時間">${timeOpts(r.t)}</select>
+            <input class="in ed-n" value="${escH(r.name)}" placeholder="景點名稱（日文最準）" maxlength="80" aria-label="名稱"></div>
+          <div class="ed-times"><label>停留 <select class="in ed-s" aria-label="停留時間">${selOpts(STAY_OPTS, r.stay, fmtDur)}</select></label>
+            ${k < rows.length - 1 ? `<label>到下一站 <select class="in ed-v" aria-label="交通時間">${selOpts(TRAVEL_OPTS, r.travel, (m) => (m ? fmtDur(m) : '0 分'))}</select></label>` : ''}
+            ${end ? `<span class="ed-end">${end} 離開</span>` : ''}
+            <span class="ed-tools"><button class="btn sm" data-a="up" ${k ? '' : 'disabled'} aria-label="上移">↑</button><button class="btn sm" data-a="dn" ${k < rows.length - 1 ? '' : 'disabled'} aria-label="下移">↓</button><button class="btn sm" data-a="ins" aria-label="在後面插入" title="在後面插入">＋</button><button class="btn sm" data-a="rm" aria-label="刪除">🗑</button></span></div>
+          <textarea class="in ed-note" rows="2" placeholder="備註" maxlength="1500" aria-label="備註">${escH(r.note)}</textarea></div>`;
+        }).join('')}</div>
+        <div class="day-actions"><button class="btn sm" data-a="add">＋ 加在最後</button>
           <button class="btn primary sm" data-a="save">💾 存檔</button>
           <button class="btn sm" data-a="cancel">取消</button>
           <button class="btn sm" data-a="reset">還原成原始行程</button></div><p class="ed-msg" id="edMsg" role="status"></p>`;
+      if (note) msg(note);
     };
     const sync = () => $$('.ed-row', body).forEach((el) => {
       const r = rows[+el.dataset.k];
-      r.t = $('.ed-t', el).value.trim(); r.name = $('.ed-n', el).value.trim();
+      if (!r) return;
+      r.name = $('.ed-n', el).value.trim();
       const nv = $('.ed-note', el).value;
       if (nv !== r.note) { r.note = nv; r.noteText = nv; }
     });
-    const msg = (t, bad) => { const m = $('#edMsg'); m.textContent = t; m.style.color = bad ? 'var(--danger, #ff453a)' : ''; };
     const send = async (payload) => {
       let key = localStorage.getItem('tokyo.editkey') || '';
       if (!key) { key = (prompt('輸入編輯密碼') || '').trim(); if (!key) { msg('需要編輯密碼才能存檔', true); return false; } }
@@ -817,68 +869,80 @@
         return true;
       } catch { msg('網路有問題，沒存到', true); return false; }
     };
-    const toMin = (t) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t).trim()); return m ? +m[1] * 60 + +m[2] : null; };
-    const fromMin = (n) => { n = Math.max(0, Math.min(1439, n)); return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`; };
-    const shiftAfter = (k, delta) => {
-      for (let j = k + 1; j < rows.length; j++) { const m = toMin(rows[j].t); if (m !== null) rows[j].t = fromMin(m + delta); }
-    };
-    body.onchange = (e) => {
-      if (e.target.classList.contains('ed-d')) {
-        sync();
-        const k = +e.target.closest('.ed-row').dataset.k, v = Math.max(0, Math.min(600, Math.round(+e.target.value) || 0));
-        if ($('#edCas').checked) shiftAfter(k, v - rows[k].dur);
-        const d = v - rows[k].dur; rows[k].dur = v; paint();
-        if (d && $('#edCas').checked) msg(`後面的行程已${d > 0 ? '再延後' : '提早'} ${Math.abs(d)} 分鐘`);
-        return;
+    const blank = (t, travel) => ({ orig: -1, t, name: '', it: '', note: '', stay: 60, travel });
+    body.onchange = async (e) => {
+      const t = e.target;
+      if (t.id === 'edCas') { localStorage.setItem('tokyo.cascade', t.checked ? '1' : '0'); return; }
+      const row = t.closest('.ed-row');
+      if (!row) return;
+      sync();
+      const k = +row.dataset.k, r = rows[k];
+      if (t.classList.contains('ed-t')) { r.t = t.value; chain(k); paint('後面的時間已重算'); }
+      else if (t.classList.contains('ed-s')) { r.stay = +t.value; chain(k); paint('後面的時間已重算'); }
+      else if (t.classList.contains('ed-v')) { r.travel = +t.value; r.tm = true; chain(k); paint('後面的時間已重算'); }
+      else if (t.classList.contains('ed-n') && r.orig < 0 && r.name && r.name !== r.gname) {
+        const key = localStorage.getItem('tokyo.editkey');
+        if (!key) return msg('名稱已改。開啟雲端同步後，會自動找位置並估算交通時間。');
+        msg('找位置中…');
+        try {
+          const g = await (await fetch('/api/geo?q=' + encodeURIComponent(r.name), { headers: { 'x-edit-key': key } })).json();
+          if (g.lat) {
+            r.lat = g.lat; r.lng = g.lng; r.gname = r.name;
+            reest(k - 1); reest(k); chain(k - 1);
+            paint(`找到位置，前後的交通時間已用距離估算（前一站到這裡 ${k ? rows[k - 1].travel : '—'} 分、到下一站 ${k < rows.length - 1 ? r.travel : '—'} 分），後面的時間已重算`);
+          } else msg('找不到這個地名的位置，導航會用名稱搜尋；交通時間請自己選。');
+        } catch { msg('找位置失敗，交通時間請自己選。'); }
       }
-      if (e.target.id === 'edCas') { localStorage.setItem('tokyo.cascade', e.target.checked ? '1' : '0'); return; }
-      if (!e.target.classList.contains('ed-t')) return;
-      const row = e.target.closest('.ed-row'), k = +row.dataset.k;
-      const a = toMin(rows[k].t), c = toMin(e.target.value);
-      rows[k].t = e.target.value.trim();
-      if (a === null || c === null || a === c || !$('#edCas').checked) return;
-      const rowsEl = $$('.ed-row', body);
-      for (let j = k + 1; j < rows.length; j++) {
-        const m = toMin(rows[j].t);
-        if (m === null) continue;
-        rows[j].t = fromMin(m + (c - a));
-        $('.ed-t', rowsEl[j]).value = rows[j].t;
-      }
-      msg(`後面的行程已一起${c > a ? '延後' : '提早'} ${Math.abs(c - a)} 分鐘，可再個別調整`);
     };
     body.onclick = async (e) => {
       const b = e.target.closest('[data-a]'); if (!b) return;
       const a = b.dataset.a, k = +(b.closest('.ed-row')?.dataset.k ?? -1);
-      if (a === 'cancel') { body.onclick = null; renderDay(i); return; }
+      if (a === 'cancel') { body.onclick = null; body.onchange = null; renderDay(i); return; }
       sync();
-      if (a === 'up' || a === 'dn') { const j = a === 'up' ? k - 1 : k + 1; [rows[k], rows[j]] = [rows[j], rows[k]]; paint(); }
-      else if (a === 'rm') {
-        const cur = toMin(rows[k].t), nxt = rows[k + 1] ? toMin(rows[k + 1].t) : null;
-        const freed = nxt !== null && cur !== null && nxt > cur ? nxt - cur : rows[k].ins ? rows[k].dur : 0;
-        const on = $('#edCas').checked;
+      if (a === 'up' || a === 'dn') {
+        const j = a === 'up' ? k - 1 : k + 1, lo = Math.min(k, j), t0 = rows[lo].t;
+        [rows[k], rows[j]] = [rows[j], rows[k]];
+        rows[lo].t = t0;
+        if (auto()) { reest(lo - 1); reest(lo); reest(lo + 1); chain(Math.max(0, lo - 1)); }
+        paint(auto() ? '已換位，前後的交通與時間已重算' : '已換位');
+      } else if (a === 'rm') {
+        const gone = rows[k];
         rows.splice(k, 1);
-        if (on && freed && k < rows.length) shiftAfter(k - 1, -freed);
-        paint();
-        if (on && freed && k < rows.length) msg(`已刪除，後面的行程提早 ${freed} 分鐘`);
-      }
-      else if (a === 'ins') {
-        const nx = rows[k + 1], prevM = toMin(rows[k].t);
-        const t = nx && toMin(nx.t) !== null ? nx.t : prevM !== null ? fromMin(prevM + 60) : '';
-        rows.splice(k + 1, 0, { orig: -1, t, name: '', it: '', note: '', ins: true, dur: 60 });
-        const on = $('#edCas').checked;
-        if (on) shiftAfter(k + 1, 60);
-        paint();
+        if (auto() && rows.length) {
+          if (k > 0) { reest(k - 1); chain(k - 1); }
+          else if (rows[0] && toMin(gone.t) !== null) { rows[0].t = gone.t; chain(0); }
+        }
+        paint(auto() ? `已刪除，後面的時間往前移（省下 ${fmtDur((gone.stay || 0) + (gone.travel || 0))}）` : '已刪除');
+      } else if (a === 'ins') {
+        const prev = rows[k], oldTravel = prev.travel;
+        const nr = blank('', oldTravel);
+        prev.travel = 15; prev.tm = false;
+        const at = toMin(prev.t);
+        nr.t = at !== null ? fromMin(at + prev.stay + prev.travel) : '';
+        rows.splice(k + 1, 0, nr);
+        if (k + 2 >= rows.length) nr.travel = 0;
+        chain(k);
+        paint(auto() ? '已插入：開始時間＝上一站離開＋交通 15 分。填名稱後會自動找位置、重算交通；後面的行程已順延' : '已插入（沒勾自動重算，後面時間不變）');
         $$('.ed-n', body)[k + 1].focus();
-        msg(on ? '已插入，後面的行程順延 60 分鐘；可改下方的停留分鐘數' : '已插入（沒有勾平移，後面時間不變）');
-      }
-      else if (a === 'add') { rows.push({ orig: -1, t: '', name: '', it: '', note: '' }); paint(); $$('.ed-n', body).at(-1).focus(); }
-      else if (a === 'reset') {
+      } else if (a === 'add') {
+        const last = rows[rows.length - 1];
+        last.travel = 15; last.tm = false;
+        const at = toMin(last.t);
+        rows.push(blank(at !== null ? fromMin(at + last.stay + 15) : '', 0));
+        paint('已加在最後，開始時間＝上一站離開＋交通 15 分');
+        $$('.ed-n', body).at(-1).focus();
+      } else if (a === 'reset') {
         if (!confirm('這天的修改全部清掉，還原成原本的行程？')) return;
         if (await send({ reset: true })) location.reload();
       } else if (a === 'save') {
         const ok = rows.filter((r) => r.name);
         if (!ok.length) return msg('至少要留一個景點', true);
-        const stops = ok.map((r) => ({ orig: r.orig, t: r.t, name: r.name, it: r.it || undefined, noteText: r.noteText, q: r.orig < 0 ? r.name : undefined, ...(r.orig < 0 && r.lat && r.gname === r.name ? { lat: r.lat, lng: r.lng, gname: r.gname } : {}) }));
+        const stops = ok.map((r) => ({
+          orig: r.orig, t: toMin(r.t) !== null ? fromMin(toMin(r.t)) : r.t, name: r.name, it: r.it || undefined, noteText: r.noteText,
+          stay: r.stay, travel: r.travel, tm: r.tm || undefined,
+          q: r.orig < 0 ? r.name : undefined,
+          ...(r.orig < 0 && r.lat && r.gname === r.name ? { lat: r.lat, lng: r.lng, gname: r.gname } : {}),
+        }));
         if (await send({ stops })) location.reload();
       }
     };

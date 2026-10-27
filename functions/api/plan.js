@@ -32,6 +32,8 @@ function cleanStop(s) {
   const la = Number(s.lat), ln = Number(s.lng);
   if (inKanto(la, ln)) { o.lat = la; o.lng = ln; o.gname = str(s.gname, 80); }
   if (s.orig !== undefined) o.orig = Number.isInteger(s.orig) ? s.orig : -1; // 對應原始行程第幾個景點
+  for (const k of ['stay', 'travel']) { const n = Math.round(Number(s[k])); if (Number.isFinite(n) && n >= 0 && n <= 720) o[k] = n; }
+  if (s.tm) o.tm = true;
   if (s.del) o.del = true;
   return o;
 }

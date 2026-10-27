@@ -755,3 +755,13 @@ select.in { appearance: none; -webkit-appearance: none; }
 }
 .ed-dur { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
 .ed-dur .ed-d { width: 76px; padding: 6px 10px; }
+.ed-top { display: flex; gap: 8px; align-items: center; }
+.ed-top .ed-t { width: 92px; flex: none; padding-left: 10px; padding-right: 6px; }
+.ed-top .ed-n { flex: 1 1 auto; min-width: 0; }
+.ed-times { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; color: var(--muted); }
+.ed-times label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ed-times select.in { padding: 6px 8px; width: auto; max-width: 118px; }
+.ed-end { color: var(--faint); font-variant-numeric: tabular-nums; }
+.ed-tools { margin-left: auto; display: inline-flex; gap: 6px; }
+.ed-tools .btn { padding: 6px 10px; min-width: 38px; }
+@media (max-width: 560px) { .ed-top { flex-wrap: nowrap; } .ed-top .ed-n { flex-basis: auto; } }
