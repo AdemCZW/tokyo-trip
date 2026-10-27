@@ -753,3 +753,5 @@ select.in { appearance: none; -webkit-appearance: none; }
   .stat .v { font-size: 22px; line-height: 1.15; }
   .stat .k { font-size: 12.5px; }
 }
+.ed-dur { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.ed-dur .ed-d { width: 76px; padding: 6px 10px; }

@@ -781,14 +781,16 @@
     const body = $('#dayBody');
     const paint = () => {
       body.innerHTML = `<div class="day-intro"><h2 class="h2" style="margin-top:0">✏️ 編輯 Day ${i + 1}</h2>
-        <p>改時間、名稱、備註，用 ↑↓ 調順序，🗑 刪掉。新增的景點沒有地圖位置，導航會用名稱搜尋。存檔需要編輯密碼，存好後兩支手機重新整理都看得到。</p></div>
+        <p>改時間、名稱、備註，用 ↑↓ 調順序，🗑 刪掉；按 ＋ 可在那一站後面<b>插入一個行程</b>，後面的行程會自動順延。新增的景點沒有地圖位置，導航會用名稱搜尋。存檔需要編輯密碼，存好後兩支手機重新整理都看得到。</p></div>
         <label class="ed-cas"><input type="checkbox" id="edCas" ${localStorage.getItem('tokyo.cascade') === '0' ? '' : 'checked'}> 改時間時，<b>後面的行程一起平移</b></label>
         <div class="ed-list">${rows.map((r, k) => `<div class="ed-row" data-k="${k}">
           <div class="ed-top"><input class="in ed-t" value="${escH(r.t)}" placeholder="時間" maxlength="12" aria-label="時間">
             <input class="in ed-n" value="${escH(r.name)}" placeholder="名稱" maxlength="80" aria-label="名稱">
             <button class="btn sm" data-a="up" ${k ? '' : 'disabled'} aria-label="上移">↑</button>
             <button class="btn sm" data-a="dn" ${k < rows.length - 1 ? '' : 'disabled'} aria-label="下移">↓</button>
-            <button class="btn sm" data-a="rm" aria-label="刪除">🗑</button></div>
+            <button class="btn sm" data-a="rm" aria-label="刪除">🗑</button>
+            <button class="btn sm" data-a="ins" aria-label="在這一站後面插入一個行程" title="在後面插入">＋</button></div>
+          ${r.ins ? `<label class="ed-dur">停留約 <input class="in ed-d" type="number" min="0" max="600" step="5" value="${r.dur}" aria-label="停留分鐘"> 分鐘（後面的行程會順延）</label>` : ''}
           <textarea class="in ed-note" rows="2" placeholder="備註" maxlength="1500" aria-label="備註">${escH(r.note)}</textarea></div>`).join('')}</div>
         <div class="day-actions"><button class="btn sm" data-a="add">＋ 新增景點</button>
           <button class="btn primary sm" data-a="save">💾 存檔</button>
@@ -817,7 +819,18 @@
     };
     const toMin = (t) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t).trim()); return m ? +m[1] * 60 + +m[2] : null; };
     const fromMin = (n) => { n = Math.max(0, Math.min(1439, n)); return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`; };
+    const shiftAfter = (k, delta) => {
+      for (let j = k + 1; j < rows.length; j++) { const m = toMin(rows[j].t); if (m !== null) rows[j].t = fromMin(m + delta); }
+    };
     body.onchange = (e) => {
+      if (e.target.classList.contains('ed-d')) {
+        sync();
+        const k = +e.target.closest('.ed-row').dataset.k, v = Math.max(0, Math.min(600, Math.round(+e.target.value) || 0));
+        if ($('#edCas').checked) shiftAfter(k, v - rows[k].dur);
+        const d = v - rows[k].dur; rows[k].dur = v; paint();
+        if (d && $('#edCas').checked) msg(`後面的行程已${d > 0 ? '再延後' : '提早'} ${Math.abs(d)} 分鐘`);
+        return;
+      }
       if (e.target.id === 'edCas') { localStorage.setItem('tokyo.cascade', e.target.checked ? '1' : '0'); return; }
       if (!e.target.classList.contains('ed-t')) return;
       const row = e.target.closest('.ed-row'), k = +row.dataset.k;
@@ -839,7 +852,25 @@
       if (a === 'cancel') { body.onclick = null; renderDay(i); return; }
       sync();
       if (a === 'up' || a === 'dn') { const j = a === 'up' ? k - 1 : k + 1; [rows[k], rows[j]] = [rows[j], rows[k]]; paint(); }
-      else if (a === 'rm') { rows.splice(k, 1); paint(); }
+      else if (a === 'rm') {
+        const cur = toMin(rows[k].t), nxt = rows[k + 1] ? toMin(rows[k + 1].t) : null;
+        const freed = nxt !== null && cur !== null && nxt > cur ? nxt - cur : rows[k].ins ? rows[k].dur : 0;
+        const on = $('#edCas').checked;
+        rows.splice(k, 1);
+        if (on && freed && k < rows.length) shiftAfter(k - 1, -freed);
+        paint();
+        if (on && freed && k < rows.length) msg(`已刪除，後面的行程提早 ${freed} 分鐘`);
+      }
+      else if (a === 'ins') {
+        const nx = rows[k + 1], prevM = toMin(rows[k].t);
+        const t = nx && toMin(nx.t) !== null ? nx.t : prevM !== null ? fromMin(prevM + 60) : '';
+        rows.splice(k + 1, 0, { orig: -1, t, name: '', it: '', note: '', ins: true, dur: 60 });
+        const on = $('#edCas').checked;
+        if (on) shiftAfter(k + 1, 60);
+        paint();
+        $$('.ed-n', body)[k + 1].focus();
+        msg(on ? '已插入，後面的行程順延 60 分鐘；可改下方的停留分鐘數' : '已插入（沒有勾平移，後面時間不變）');
+      }
       else if (a === 'add') { rows.push({ orig: -1, t: '', name: '', it: '', note: '' }); paint(); $$('.ed-n', body).at(-1).focus(); }
       else if (a === 'reset') {
         if (!confirm('這天的修改全部清掉，還原成原本的行程？')) return;
