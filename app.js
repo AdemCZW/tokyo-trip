@@ -809,7 +809,7 @@
       try {
         const r = await fetch('/api/plan', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-edit-key': key }, body: JSON.stringify({ day: i, ...payload }) });
         if (r.status === 401) { localStorage.removeItem('tokyo.editkey'); msg('編輯密碼不正確', true); return false; }
-        if (!r.ok) { msg('存檔失敗（' + r.status + '），這個網址可能不支援雲端存檔', true); return false; }
+        if (!r.ok) { msg(r.status === 405 || r.status === 404 ? '這個網址不能存檔，請改用 tokyo-trip-2pc.pages.dev' : '存檔失敗（' + r.status + '）', true); return false; }
         const saved = await r.json();
         try { localStorage.setItem('tokyo.editkey', key); localStorage.setItem(EDITS_KEY, JSON.stringify(saved)); } catch { /* 無痕模式：已存到雲端，只是沒快取 */ }
         return true;
