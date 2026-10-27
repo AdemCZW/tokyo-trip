@@ -470,7 +470,6 @@
         <dt>價位</dt><dd>${f.price}</dd>
         <dt>時間</dt><dd>${f.hours}</dd>
         ${f.reserve ? `<dt>訂位</dt><dd>${f.reserve}</dd>` : ''}
-        <dt>地址</dt><dd>${f.addr}</dd>
       </dl>
       ${f.note ? `<div class="fnote">${f.note}</div>` : ''}
       <div class="foot">${bookBtn(f.book)}${navBtn(f, 'walking')}<a class="navlink ghost" target="_blank" rel="noopener" href="${gsearch(f.name + ' ' + f.addr)}">評論 / 照片</a></div>
