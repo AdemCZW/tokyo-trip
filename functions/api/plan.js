@@ -10,12 +10,27 @@ function same(a, b) {
   return d === 0;
 }
 
+const inKanto = (la, ln) => Number.isFinite(la) && Number.isFinite(ln) && la > 34.8 && la < 37.2 && ln > 138.4 && ln < 140.9;
+
+// 新增的景點：用 OpenStreetMap 依名稱找座標（找不到就沒有地圖標記，導航仍會用名稱搜尋）
+async function geocode(name) {
+  try {
+    const u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=jp&accept-language=ja&q=' + encodeURIComponent(name);
+    const r = await fetch(u, { headers: { 'user-agent': 'tokyo-trip-planner/1.0 (personal trip site)' }, signal: AbortSignal.timeout(4000) });
+    const j = await r.json();
+    const la = Number(j[0]?.lat), ln = Number(j[0]?.lon);
+    return inKanto(la, ln) ? { lat: la, lng: ln } : null;
+  } catch { return null; }
+}
+
 function cleanStop(s) {
   if (!s || typeof s !== 'object') return null;
   const o = { t: str(s.t, 12).replace(/[<>&"']/g, ''), name: str(s.name, 80) };
   if (!o.name) return null;
   if (typeof s.noteText === 'string') o.noteText = str(s.noteText, 1500);
   for (const k of ['it', 'q']) if (s[k]) o[k] = str(s[k], 120);
+  const la = Number(s.lat), ln = Number(s.lng);
+  if (inKanto(la, ln)) { o.lat = la; o.lng = ln; o.gname = str(s.gname, 80); }
   if (s.orig !== undefined) o.orig = Number.isInteger(s.orig) ? s.orig : -1; // 對應原始行程第幾個景點
   if (s.del) o.del = true;
   return o;
@@ -39,6 +54,10 @@ export async function onRequest({ request, env }) {
   if (body.reset) delete doc.days[day];
   else {
     const stops = (Array.isArray(body.stops) ? body.stops : []).slice(0, 40).map(cleanStop).filter(Boolean);
+    for (const st of stops.filter((x) => x.orig < 0 && !x.lat).slice(0, 5)) {
+      const g = await geocode(st.name);
+      if (g) { st.lat = g.lat; st.lng = g.lng; st.gname = st.name; }
+    }
     doc.days[day] = { stops };
   }
   doc.updated = Date.now();

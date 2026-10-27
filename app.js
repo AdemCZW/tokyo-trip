@@ -92,7 +92,7 @@
         base.name = escH(x.name);
         if (x.it !== undefined) base.it = escH(x.it);
         if (x.noteText !== undefined) base.note = escH(x.noteText).replace(/\n/g, '<br>');
-        if (base._o < 0) { base.q = x.q || x.name; base.it = base.it || ''; }
+        if (base._o < 0) { base.it = base.it || ''; if (x.lat) { base.lat = x.lat; base.lng = x.lng; base.gname = x.gname; } else base.q = x.q || x.name; }
         return base;
       });
     });
@@ -114,7 +114,7 @@
     `https://www.google.com/maps/dir/?api=1&destination=${q ? encodeURIComponent(q) : `${lat},${lng}`}&travelmode=${mode}`;
   const gsearch = (q) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
   const navBtn = (p, mode, label = '導航') =>
-    p.lat ? `<a class="navlink" target="_blank" rel="noopener" href="${gmap(p.lat, p.lng, mode, p.q)}" onclick="event.stopPropagation()">➜ ${label}</a>` : '';
+    p.lat || p.q ? `<a class="navlink" target="_blank" rel="noopener" href="${gmap(p.lat, p.lng, mode, p.q)}" onclick="event.stopPropagation()">➜ ${label}</a>` : '';
   // 需要買票／訂位的地方：data 裡寫 book: { label, url }，畫成一顆票券按鈕
   const bookBtn = (b) => b && b.url
     ? `<a class="navlink book" target="_blank" rel="noopener" href="${b.url}" onclick="event.stopPropagation()">🎫 ${b.label || '訂票'}</a>` : '';
@@ -390,7 +390,7 @@
           <div class="stop ${s.kind || ''}" style="--c:${c}" data-idx="${idx}">
             <div class="row1"><span class="nm">${idx ? `${idx}. ` : ''}${s.name}</span>${s.it ? `<span class="it">${s.it}</span>` : ''}</div>
             ${s.note ? `<div class="note">${s.note}</div>` : ''}
-            ${s.tags || s.lat ? `<div class="meta">${pills(s.tags)}<span class="go">${bookBtn(s.book)}${navBtn(s, s.mode || d.mode || 'walking')}</span></div>` : ''}
+            ${s.tags || s.lat || s.q ? `<div class="meta">${pills(s.tags)}<span class="go">${bookBtn(s.book)}${navBtn(s, s.mode || d.mode || 'walking')}</span></div>` : ''}
           </div></li>`;
       }).join('')}</ol>`;
     $('#daySide').innerHTML = `<h3>${d.side.title}</h3>${list(d.side.items)}`;
@@ -777,7 +777,7 @@
   const plain = (h) => String(h || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
   function openEditor(i) {
     const d = T.days[i];
-    let rows = d.stops.map((s, k) => ({ orig: s._o ?? k, t: s.t || '', name: plain(s.name), it: plain(s.it), note: plain(s.note), noteText: ((s._o ?? k) < 0 || plain(s.note) !== plain((ORIG[i][s._o ?? k] || {}).note)) ? plain(s.note) : undefined, q: s.q }));
+    let rows = d.stops.map((s, k) => ({ orig: s._o ?? k, t: s.t || '', name: plain(s.name), it: plain(s.it), note: plain(s.note), lat: (s._o ?? k) < 0 ? s.lat : undefined, lng: (s._o ?? k) < 0 ? s.lng : undefined, gname: (s._o ?? k) < 0 ? s.gname : undefined, noteText: ((s._o ?? k) < 0 || plain(s.note) !== plain((ORIG[i][s._o ?? k] || {}).note)) ? plain(s.note) : undefined, q: s.q }));
     const body = $('#dayBody');
     const paint = () => {
       body.innerHTML = `<div class="day-intro"><h2 class="h2" style="margin-top:0">✏️ 編輯 Day ${i + 1}</h2>
@@ -878,7 +878,7 @@
       } else if (a === 'save') {
         const ok = rows.filter((r) => r.name);
         if (!ok.length) return msg('至少要留一個景點', true);
-        const stops = ok.map((r) => ({ orig: r.orig, t: r.t, name: r.name, it: r.it || undefined, noteText: r.noteText, q: r.orig < 0 ? r.name : undefined }));
+        const stops = ok.map((r) => ({ orig: r.orig, t: r.t, name: r.name, it: r.it || undefined, noteText: r.noteText, q: r.orig < 0 ? r.name : undefined, ...(r.orig < 0 && r.lat && r.gname === r.name ? { lat: r.lat, lng: r.lng, gname: r.gname } : {}) }));
         if (await send({ stops })) location.reload();
       }
     };
