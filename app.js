@@ -9,7 +9,9 @@
   const NDAYS = T.days.length;
 
   /* ---------- 雲端同步：購物紀錄、待辦打勾、出發日（需編輯密碼） ---------- */
-  const SYNC = { ledger: 'tokyo.ledger', checks: 'tokyo.checks', start: 'tokyo.start' };
+  const SYNC = { ledger: 'tokyo.ledger', checks: 'tokyo.checks', start: 'tokyo.start', shared: 'tokyo.shared', people: 'tokyo.people' };
+  const SYNC_DEFAULT = { ledger: '[]', checks: '{}', shared: '[]', people: '["我","同伴"]' };
+  const mergeList = (a, b) => { const m = new Map(); [...a, ...b].forEach((e) => { const o = m.get(e.id); if (!o || (e.m || 0) > (o.m || 0)) m.set(e.id, e); }); return [...m.values()].sort((x, y) => x.id - y.id); };
   const cloudKey = () => localStorage.getItem('tokyo.editkey') || '';
   const cloudTimers = {};
   function cloudPush(k) {
@@ -20,9 +22,10 @@
   }
   async function cloudSend(k) {
     const raw = localStorage.getItem(SYNC[k]);
-    const v = k === 'start' ? raw || '' : JSON.parse(raw || (k === 'ledger' ? '[]' : '{}'));
+    const v = k === 'start' ? raw || '' : JSON.parse(raw || SYNC_DEFAULT[k]);
     const r = await fetch('/api/store?k=' + k, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-edit-key': cloudKey() }, body: JSON.stringify({ v, u: +localStorage.getItem('tokyo.u.' + k) || Date.now() }) });
     if (r.status === 401) localStorage.removeItem('tokyo.editkey');
+    if (r.ok && k === 'shared') { const d = await r.json(); shared = mergeList(shared, d.v || []); localStorage.setItem('tokyo.shared', JSON.stringify(shared)); renderExpenses(); }
     return r.ok;
   }
   async function cloudPull() {
@@ -35,10 +38,16 @@
         if (!r.ok) continue;
         const c = await r.json();
         const lu = +localStorage.getItem('tokyo.u.' + k) || 0;
+        if (k === 'shared') {
+          const merged = mergeList(shared, c.v || []);
+          if (JSON.stringify(merged) !== JSON.stringify(shared)) { shared = merged; localStorage.setItem('tokyo.shared', JSON.stringify(shared)); renderExpenses(); }
+          if (JSON.stringify(merged) !== JSON.stringify(c.v || [])) await cloudSend(k);
+          continue;
+        }
         if (c.u && c.u > lu) {
           localStorage.setItem(SYNC[k], k === 'start' ? c.v : JSON.stringify(c.v));
           localStorage.setItem('tokyo.u.' + k, String(c.u));
-          changed = true;
+          if (k === 'people') { people = c.v; renderExpenses(); } else changed = true;
         } else if (lu > (c.u || 0) || (!c.u && localStorage.getItem(SYNC[k]))) {
           if (!lu) localStorage.setItem('tokyo.u.' + k, String(Date.now()));
           await cloudSend(k);
@@ -615,7 +624,7 @@
   let taxQ = '';
 
   function renderShopSeg() {
-    seg($('#shopSeg'), [{ k: 'tax', label: '🧾 退稅指南' }, { k: 'ledger', label: '📒 購物紀錄' }], shopPane, (k) => {
+    seg($('#shopSeg'), [{ k: 'tax', label: '🧾 退稅' }, { k: 'ledger', label: '📒 購物紀錄' }, { k: 'exp', label: '💰 記帳' }], shopPane, (k) => {
       shopPane = k;
       $$('.shop-pane').forEach((p) => (p.hidden = p.dataset.pane !== k));
       renderShopSeg();
@@ -672,11 +681,21 @@
           <label>類別<select class="in" id="lfKind"><option>一般物品</option><option>消耗品（食品、藥妝）</option></select></label>
         </div>
         <datalist id="lfShops">${T.tax.shops.map((x) => `<option value="${esc(x.name)}"></option>`).join('')}</datalist>
-        <button class="btn primary" id="lfAdd" type="button">＋ 加入紀錄</button>
+        <div class="day-actions">${scanBtn('lfScan')}<button class="btn primary" id="lfAdd" type="button">＋ 加入紀錄</button></div>
         <p class="src" id="lfHint"></p>
       </div>
       <div id="ledgerSum"></div>
       <div id="ledgerList"></div>`;
+    $('#lfScan').addEventListener('change', async (e) => {
+      if (!e.target.files[0]) return;
+      const j = await scanReceipt(e.target.files[0], (t) => { $('#lfHint').innerHTML = t; });
+      e.target.value = '';
+      if (!j) return;
+      if (j.store) $('#lfStore').value = j.store;
+      if (j.total) $('#lfAmt').value = j.total;
+      if (j.items && j.items.length) $('#lfItem').value = j.items.slice(0, 3).join('、');
+      if (j.date && [...$('#lfDate').options].some((o) => o.value === j.date)) $('#lfDate').value = j.date;
+    });
     $('#lfAdd').addEventListener('click', () => {
       const store_ = $('#lfStore').value.trim();
       const amt = Number($('#lfAmt').value);
@@ -764,6 +783,7 @@
     const paint = () => {
       body.innerHTML = `<div class="day-intro"><h2 class="h2" style="margin-top:0">✏️ 編輯 Day ${i + 1}</h2>
         <p>改時間、名稱、備註，用 ↑↓ 調順序，🗑 刪掉。新增的景點沒有地圖位置，導航會用名稱搜尋。存檔需要編輯密碼，存好後兩支手機重新整理都看得到。</p></div>
+        <label class="ed-cas"><input type="checkbox" id="edCas" ${localStorage.getItem('tokyo.cascade') === '0' ? '' : 'checked'}> 改時間時，<b>後面的行程一起平移</b></label>
         <div class="ed-list">${rows.map((r, k) => `<div class="ed-row" data-k="${k}">
           <div class="ed-top"><input class="in ed-t" value="${escH(r.t)}" placeholder="時間" maxlength="12" aria-label="時間">
             <input class="in ed-n" value="${escH(r.name)}" placeholder="名稱" maxlength="80" aria-label="名稱">
@@ -795,6 +815,24 @@
         try { localStorage.setItem('tokyo.editkey', key); localStorage.setItem(EDITS_KEY, JSON.stringify(saved)); } catch { /* 無痕模式：已存到雲端，只是沒快取 */ }
         return true;
       } catch { msg('網路有問題，沒存到', true); return false; }
+    };
+    const toMin = (t) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t).trim()); return m ? +m[1] * 60 + +m[2] : null; };
+    const fromMin = (n) => { n = Math.max(0, Math.min(1439, n)); return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`; };
+    body.onchange = (e) => {
+      if (e.target.id === 'edCas') { localStorage.setItem('tokyo.cascade', e.target.checked ? '1' : '0'); return; }
+      if (!e.target.classList.contains('ed-t')) return;
+      const row = e.target.closest('.ed-row'), k = +row.dataset.k;
+      const a = toMin(rows[k].t), c = toMin(e.target.value);
+      rows[k].t = e.target.value.trim();
+      if (a === null || c === null || a === c || !$('#edCas').checked) return;
+      const rowsEl = $$('.ed-row', body);
+      for (let j = k + 1; j < rows.length; j++) {
+        const m = toMin(rows[j].t);
+        if (m === null) continue;
+        rows[j].t = fromMin(m + (c - a));
+        $('.ed-t', rowsEl[j]).value = rows[j].t;
+      }
+      msg(`後面的行程已一起${c > a ? '延後' : '提早'} ${Math.abs(c - a)} 分鐘，可再個別調整`);
     };
     body.onclick = async (e) => {
       const b = e.target.closest('[data-a]'); if (!b) return;
@@ -833,6 +871,189 @@
     } catch { /* 離線或不在 Cloudflare 網址：用本機快取 */ }
   }
 
+  /* ---------- 收據拍照辨識（Workers AI，結果只當建議，要核對） ---------- */
+  async function shrinkImage(file) {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1400 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.82);
+  }
+  async function scanReceipt(file, say) {
+    if (!cloudKey()) { say('要先到「總覽」開啟雲端同步（輸入編輯密碼），才能用拍照辨識。'); return null; }
+    say('辨識中…（約 5–15 秒）');
+    try {
+      const r = await fetch('/api/receipt', { method: 'POST', headers: { 'content-type': 'application/json', 'x-edit-key': cloudKey() }, body: JSON.stringify({ image: await shrinkImage(file) }) });
+      const j = await r.json();
+      if (!r.ok) { say(j.error || '辨識失敗'); return null; }
+      if (!j.store && !j.total) { say('讀不出來，請拍清楚一點（平放、光線足、整張入鏡）或手動輸入。'); return null; }
+      say('已帶入，<b>請對照收據核對店名和金額</b>再加入。');
+      return j;
+    } catch { say('辨識失敗，網路有問題或照片太大。'); return null; }
+  }
+  const scanBtn = (id) => `<label class="btn sm scan" for="${id}">📷 拍收據辨識</label><input id="${id}" type="file" accept="image/*" capture="environment" hidden>`;
+
+  /* ---------- 記帳：共同分帳（雲端合併）＋ 私人支出（只存這支手機） ---------- */
+  const EXP_CATS = ['餐飲', '交通', '購物', '門票', '住宿', '其他'];
+  const loadJ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+  let people = loadJ('tokyo.people', null);
+  if (!Array.isArray(people) || !people.length) people = ['我', '同伴'];
+  let shared = loadJ('tokyo.shared', []);
+  if (!Array.isArray(shared)) shared = [];
+  let priv = loadJ('tokyo.private', []);
+  if (!Array.isArray(priv)) priv = [];
+  let meName = localStorage.getItem('tokyo.me');
+  if (!people.includes(meName)) meName = people[0];
+  const draft = { vis: 'shared', payer: meName, split: new Set(people) };
+  const savePeople = () => { localStorage.setItem('tokyo.people', JSON.stringify(people)); cloudPush('people'); };
+  const saveShared = () => { localStorage.setItem('tokyo.shared', JSON.stringify(shared)); cloudPush('shared'); };
+  const savePriv = () => localStorage.setItem('tokyo.private', JSON.stringify(priv));
+
+  function settle() {
+    const bal = {};
+    const add = (n, v) => { bal[n] = (bal[n] || 0) + v; };
+    people.forEach((n) => add(n, 0));
+    shared.filter((e) => !e.del).forEach((e) => {
+      add(e.payer, e.amt);
+      const sp = e.split && e.split.length ? e.split : [e.payer];
+      sp.forEach((n) => add(n, -e.amt / sp.length));
+    });
+    const cr = [], de = [];
+    Object.entries(bal).forEach(([n, v]) => { const r = Math.round(v); if (r > 0) cr.push([n, r]); else if (r < 0) de.push([n, -r]); });
+    cr.sort((a, b) => b[1] - a[1]); de.sort((a, b) => b[1] - a[1]);
+    const tx = [];
+    let i = 0, j = 0;
+    while (i < cr.length && j < de.length) {
+      const m = Math.min(cr[i][1], de[j][1]);
+      tx.push({ from: de[j][0], to: cr[i][0], amt: m });
+      cr[i][1] -= m; de[j][1] -= m;
+      if (!cr[i][1]) i++;
+      if (!de[j][1]) j++;
+    }
+    return { bal, tx };
+  }
+
+  function renderExpenses() {
+    const box = $('#shopExp');
+    if (!box || !$('#exSum')) return;
+    // 旅伴
+    $('#exPeople').innerHTML = people.map((n) => `<button class="chipb ${n === meName ? 'on' : ''}" data-p="${esc(n)}" type="button">${esc(n)}${n === meName && n !== '我' ? '（我）' : ''}</button>`).join('') +
+      `<button class="chipb add" id="exAddP" type="button">＋ 新增旅伴</button>`;
+    $('#exPayer').innerHTML = people.map((n) => `<button class="chipb ${n === draft.payer ? 'on' : ''}" data-payer="${esc(n)}" type="button">${esc(n)}</button>`).join('');
+    $('#exSplit').innerHTML = people.map((n) => `<label class="splitrow"><span>${esc(n)}</span><input type="checkbox" data-sp="${esc(n)}" ${draft.split.has(n) ? 'checked' : ''}></label>`).join('');
+    $$('#exVis button').forEach((b) => b.classList.toggle('on', b.dataset.v === draft.vis));
+    $('#exSharedOnly').hidden = draft.vis !== 'shared';
+    // 摘要
+    const live = shared.filter((e) => !e.del);
+    const { bal, tx } = settle();
+    const total = live.reduce((a, e) => a + e.amt, 0);
+    const mine = priv.filter((e) => !e.del).reduce((a, e) => a + e.amt, 0);
+    $('#exSum').innerHTML = `<div class="card"><h3>分帳結算</h3>
+      <div class="ex-tot"><div><small>共同支出</small><b>${yen(total)}</b><em>${twd(total)}</em></div><div><small>我的私人支出 🔒</small><b>${yen(mine)}</b><em>${twd(mine)}</em></div></div>
+      ${live.length ? `<table class="ex-tb"><tr><th>人</th><th>先付</th><th>應分攤</th><th>差額</th></tr>${Object.keys(bal).map((n) => {
+        const paid = live.filter((e) => e.payer === n).reduce((a, e) => a + e.amt, 0);
+        const owe = paid - bal[n];
+        return `<tr><td>${esc(n)}</td><td>${yen(paid)}</td><td>${yen(Math.round(owe))}</td><td class="${bal[n] >= 0 ? 'pos' : 'neg'}">${bal[n] >= 0 ? '+' : '−'}${yen(Math.abs(Math.round(bal[n])))}</td></tr>`;
+      }).join('')}</table>
+      ${tx.length ? `<div class="ex-tx">${tx.map((t) => `<div>👉 <b>${esc(t.from)}</b> 付給 <b>${esc(t.to)}</b> <b>${yen(t.amt)}</b>（${twd(t.amt)}）</div>`).join('')}</div>` : '<p class="src">目前沒有人欠錢，帳是平的。</p>'}` : '<p class="src">還沒有共同支出。</p>'}</div>`;
+    // 清單
+    const row = (e, lock) => `<div class="ex-item"><div class="ex-main"><b>${esc(e.title)}</b><span class="ex-m">${esc(e.date)}・${esc(e.cat)}${lock ? '' : `・${esc(e.payer)} 先付，${(e.split || []).length} 人分`}</span>${lock ? '' : `<span class="ex-m">分攤：${(e.split || []).map(esc).join('、')}</span>`}</div>
+      <div class="ex-r"><b>${yen(e.amt)}</b><button class="btn sm" data-del="${e.id}" data-lock="${lock ? 1 : 0}" type="button" aria-label="刪除">🗑</button></div></div>`;
+    $('#exList').innerHTML = `<h3 class="h3">共同支出 <span class="cnt">${live.length}</span></h3>${live.slice().reverse().map((e) => row(e, false)).join('') || '<p class="src">還沒有。</p>'}
+      <h3 class="h3">🔒 私人支出（只存在這支手機，不會上傳）</h3>${priv.filter((e) => !e.del).slice().reverse().map((e) => row(e, true)).join('') || '<p class="src">還沒有。</p>'}`;
+  }
+
+  function buildExpense() {
+    const days = tripDates();
+    const today = isoOf(new Date());
+    const opts = days.map((d) => `<option value="${isoOf(d)}" ${isoOf(d) === today ? 'selected' : ''}>${fmtDay(d)}</option>`).join('') || `<option value="${today}">${today}</option>`;
+    $('#shopExp').innerHTML = `
+      <div id="exSum"></div>
+      <div class="card ledger-form"><h3>新增支出</h3>
+        <div class="ex-lbl">可見性</div>
+        <div class="vis" id="exVis"><button type="button" data-v="shared">👥<b>共同</b><small>同行旅伴可見、要分帳</small></button><button type="button" data-v="private">🔒<b>私人</b><small>只存在這支手機</small></button></div>
+        <div id="exSharedOnly"><div class="ex-lbl">誰付款？</div><div class="chips" id="exPayer"></div>
+          <div class="ex-lbl">誰要分攤？</div><div id="exSplit"></div></div>
+        <div class="lf-grid">
+          <label>日期<select class="in" id="exDate">${opts}</select></label>
+          <label>類別<select class="in" id="exCat">${EXP_CATS.map((c) => `<option>${c}</option>`).join('')}</select></label>
+          <label>項目<input class="in" id="exTitle" placeholder="例如 午餐、地鐵" autocomplete="off"></label>
+          <label>金額（日圓）<input class="in" id="exAmt" type="number" inputmode="numeric" min="1" step="1" placeholder="例如 3200"></label>
+        </div>
+        <div class="day-actions">${scanBtn('exScan')}<button class="btn primary" id="exAdd" type="button">＋ 花下去！</button></div>
+        <p class="src" id="exHint"></p></div>
+      <div class="card"><div class="ex-lbl">旅伴（點自己的名字設成「我」，這支手機的付款人會預設是你）</div><div class="chips" id="exPeople"></div></div>
+      <div id="exList"></div>`;
+    const box = $('#shopExp');
+    box.addEventListener('click', (e) => {
+      const v = e.target.closest('#exVis button');
+      if (v) { draft.vis = v.dataset.v; renderExpenses(); return; }
+      const pay = e.target.closest('[data-payer]');
+      if (pay) { draft.payer = pay.dataset.payer; renderExpenses(); return; }
+      const pe = e.target.closest('#exPeople [data-p]');
+      if (pe) {
+        const n = pe.dataset.p;
+        if (n !== meName) { meName = n; localStorage.setItem('tokyo.me', n); draft.payer = n; renderExpenses(); return; }
+        const nv = (prompt(`「${n}」改名？輸入新名字；輸入「刪除」可移除這位旅伴。`, n) || '').trim();
+        if (!nv || nv === n) return;
+        if (nv === '刪除') {
+          if (people.length < 2) return alert('至少要留一位。');
+          if (shared.some((x) => !x.del && (x.payer === n || (x.split || []).includes(n)))) return alert('這位旅伴已有共同支出，不能刪除；可以改名。');
+          people = people.filter((x) => x !== n); meName = people[0]; draft.split.delete(n); draft.payer = meName;
+        } else {
+          if (people.includes(nv) || nv.length > 12) return alert('名字重複或太長（最多 12 字）。');
+          people = people.map((x) => (x === n ? nv : x));
+          shared.forEach((x) => { if (x.payer === n || (x.split || []).includes(n)) { x.payer = x.payer === n ? nv : x.payer; x.split = (x.split || []).map((y) => (y === n ? nv : y)); x.m = Date.now(); } });
+          if (draft.split.delete(n)) draft.split.add(nv);
+          meName = nv; draft.payer = nv; localStorage.setItem('tokyo.me', nv); saveShared();
+        }
+        savePeople(); renderExpenses(); return;
+      }
+      if (e.target.closest('#exAddP')) {
+        const nv = (prompt('新旅伴的名字（最多 12 字，最多 8 位）') || '').trim();
+        if (!nv || nv.length > 12 || people.includes(nv) || people.length >= 8) return;
+        people.push(nv); draft.split.add(nv); savePeople(); renderExpenses(); return;
+      }
+      const del = e.target.closest('[data-del]');
+      if (del) {
+        if (!confirm('刪除這筆？')) return;
+        const id = +del.dataset.del;
+        if (del.dataset.lock === '1') { priv = priv.filter((x) => x.id !== id); savePriv(); }
+        else { const t = shared.find((x) => x.id === id); if (t) { t.del = true; t.m = Date.now(); saveShared(); } }
+        renderExpenses(); return;
+      }
+      if (e.target.closest('#exAdd')) {
+        const title = $('#exTitle').value.trim(), amt = Math.round(Number($('#exAmt').value));
+        const hint = (t) => { $('#exHint').innerHTML = t; };
+        if (!title || !(amt > 0)) return hint('項目和金額要填，金額要大於 0。');
+        const base = { id: Date.now(), m: Date.now(), date: $('#exDate').value, cat: $('#exCat').value, title: title.slice(0, 40), amt };
+        if (draft.vis === 'private') { priv.push(base); savePriv(); }
+        else {
+          const split = people.filter((n) => draft.split.has(n));
+          if (!split.length) return hint('至少選一位分攤的人。');
+          shared.push({ ...base, payer: draft.payer, split }); saveShared();
+        }
+        $('#exTitle').value = ''; $('#exAmt').value = '';
+        hint(draft.vis === 'shared' ? '已加入共同帳。' + (cloudKey() ? '' : '（雲端同步沒開，只存在這支手機）') : '已加入私人支出，只存在這支手機。');
+        renderExpenses();
+      }
+    });
+    box.addEventListener('change', async (e) => {
+      const sp = e.target.closest('[data-sp]');
+      if (sp) { sp.checked ? draft.split.add(sp.dataset.sp) : draft.split.delete(sp.dataset.sp); return; }
+      if (e.target.id === 'exScan' && e.target.files[0]) {
+        const j = await scanReceipt(e.target.files[0], (t) => { $('#exHint').innerHTML = t; });
+        e.target.value = '';
+        if (!j) return;
+        if (j.store) $('#exTitle').value = j.store;
+        if (j.total) $('#exAmt').value = j.total;
+        if (j.date && [...$('#exDate').options].some((o) => o.value === j.date)) $('#exDate').value = j.date;
+      }
+    });
+    renderExpenses();
+  }
+
   /* ---------- 啟動 ---------- */
   tick();
   setInterval(tick, 15000);
@@ -847,6 +1068,7 @@
   renderTaxPane();
   buildLedgerForm();
   renderLedger();
+  buildExpense();
   renderTodo();
   renderMust();
   renderPack();

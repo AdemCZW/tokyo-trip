@@ -5,3 +5,6 @@ compatibility_date = "2026-10-01"
 [[kv_namespaces]]
 binding = "PLAN"
 id = "e3701813243f4db29c7d30ee211d4fda"
+
+[ai]
+binding = "AI"
