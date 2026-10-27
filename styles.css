@@ -765,3 +765,11 @@ select.in { appearance: none; -webkit-appearance: none; }
 .ed-tools { margin-left: auto; display: inline-flex; gap: 6px; }
 .ed-tools .btn { padding: 6px 10px; min-width: 38px; }
 @media (max-width: 560px) { .ed-top { flex-wrap: nowrap; } .ed-top .ed-n { flex-basis: auto; } }
+.chk { margin: 0 0 14px; padding: 10px 14px; border-radius: 16px; background: var(--glass); border: 1px solid var(--line); }
+.chk summary { cursor: pointer; font-weight: 650; font-size: 14.5px; }
+.chk ul { list-style: none; margin: 10px 0 4px; padding: 0; display: grid; gap: 6px; }
+.chk li { font-size: 13.5px; line-height: 1.55; padding: 7px 10px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.chk li.err { background: color-mix(in srgb, var(--err) 14%, transparent); }
+.chk li.warn { background: color-mix(in srgb, #ff9f0a 16%, transparent); }
+.chk .btn { margin-top: 6px; }
+.ai-out { margin-top: 10px; font-size: 14px; line-height: 1.7; white-space: pre-wrap; color: var(--text); }

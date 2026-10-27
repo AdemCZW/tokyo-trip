@@ -385,6 +385,7 @@
         <button class="btn sm" id="editDay" type="button">✏️ 編輯</button>
         ${pills(d.tags)}
       </div>
+      <div id="dayCheck"></div>
       <ol class="tl">${d.stops.map((s) => {
         const idx = s.lat ? ++n : 0;
         return `<li><div class="time">${s.t || ''}</div>
@@ -396,6 +397,7 @@
       }).join('')}</ol>`;
     $('#daySide').innerHTML = `<h3>${d.side.title}</h3>${list(d.side.items)}`;
     $('#editDay').addEventListener('click', () => openEditor(i));
+    renderCheck(i);
 
     if (!dayMap) dayMap = makeMap('dayMap');
     if (dayLayer) dayLayer.remove();
@@ -1151,6 +1153,102 @@
     });
     renderExpenses();
   }
+
+  /* ---------- 行程檢查：用已查證的營業時間做規則計算（不靠 AI、不編造） ---------- */
+  // m＝景點名稱關鍵字；o 開、c 關、last 最後入場；cw 某星期的關門時間（0=日…6=六）；closed 公休星期；out 戶外
+  const HOURS = [
+    { m: '巢鴨地藏通', o: '10:00', c: '18:00', out: 1, note: '有些攤位 16:00 就收' },
+    { m: '竹下通', out: 1 },
+    { m: 'SHIBUYA SKY', o: '10:00', c: '22:30', last: '21:20' },
+    { m: '谷中銀座', o: '10:00', c: '18:00', out: 1 },
+    { m: '淺草午餐', o: '11:00', c: '20:00' },
+    { m: '雷門', o: '06:30', c: '17:00', out: 1 },
+    { m: '東京晴空塔', o: '10:00', c: '22:00', last: '21:00' },
+    { m: '木村家', c: '20:00' },
+    { m: '銀座晚餐', o: '11:30', c: '22:00', last: '20:30' },
+    { m: '豪德寺', o: '06:00', c: '17:00', out: 1 },
+    { m: 'Alaska zwei', o: '09:00', c: '18:00', last: '17:00', cw: { 3: '16:00' } },
+    { m: '國立新美術館', o: '10:00', c: '18:00', cw: { 5: '20:00', 6: '20:00' }, closed: [2], lastBefore: 30 },
+    { m: '美術館晚餐', o: '16:00', c: '21:00', last: '19:30' },
+    { m: 'bills', o: '07:00', c: '21:00', cw: { 1: '17:00' } },
+    { m: '高德院', o: '08:00', c: '17:00', last: '16:45', out: 1 },
+    { m: '東京迪士尼樂園', o: '09:00', c: '21:00' },
+    { m: '小網神社', o: '09:00', c: '17:00', out: 1 },
+    { m: '最後採買', o: '10:30', c: '23:00' },
+    { m: '目黑川', out: 1 }, { m: '江之島', out: 1 }, { m: '鎌倉高校前站', out: 1 }, { m: '日光東照宮', out: 1 },
+  ];
+  const SUNSET = '16:50'; // 10/29–11/4 約 16:43–16:52，取近似值
+  const WD = ['日', '一', '二', '三', '四', '五', '六'];
+  function checkDay(i) {
+    const d = T.days[i], out = [];
+    const add = (lv, k, text) => out.push({ lv, k, text });
+    const date = store.start ? addDays(store.start, i) : null;
+    const dow = date ? date.getDay() : null;
+    const sun = toMin(SUNSET);
+    d.stops.forEach((s, k) => {
+      const nm = plain(s.name), a = toMin(s.t);
+      const h = HOURS.find((x) => nm.includes(x.m));
+      const stay = Number.isFinite(s.stay) ? s.stay : (d.stops[k + 1] && toMin(d.stops[k + 1].t) !== null && a !== null ? Math.max(0, toMin(d.stops[k + 1].t) - a) : 0);
+      if (h && a !== null) {
+        if (dow !== null && (h.closed || []).includes(dow)) add('err', k, `${nm}：週${WD[dow]}公休，這天去會撲空。`);
+        const close = toMin((dow !== null && h.cw && h.cw[dow]) || h.c);
+        const last = h.last ? toMin(h.last) : h.lastBefore && close ? close - h.lastBefore : null;
+        if (h.o && a < toMin(h.o)) add('info', k, `${nm}：${s.t} 抵達，但 ${h.o} 才開，要等 ${fmtDur(toMin(h.o) - a)}。`);
+        if (close !== null && a >= close) add('err', k, `${nm}：${s.t} 才到，已經過了關門時間 ${fromMin(close)}。`);
+        else if (last !== null && a > last) add('err', k, `${nm}：最後入場 ${fromMin(last)}，${s.t} 到會進不去。`);
+        else if (close !== null && stay && a + stay > close) add('warn', k, `${nm}：預計待到 ${fromMin(a + stay)}，但 ${fromMin(close)} 關門，要提早離開。`);
+        else if (close !== null && close - a <= 45) add('info', k, `${nm}：${fromMin(close)} 關門，只剩 ${close - a} 分鐘。`);
+      }
+      if ((h && h.out || /公園|神社|寺|海邊|商店街|通り|銀座・|橫丁/.test(nm)) && a !== null && a >= sun + 10 && !/晚餐|午餐|夜景|SKY|塔/.test(nm)) add('warn', k, `${nm}：${s.t} 才到，天黑了（日落約 ${SUNSET}），戶外景點看不到什麼。`);
+      const nx = d.stops[k + 1];
+      if (nx && a !== null && toMin(nx.t) !== null) {
+        const gap = toMin(nx.t) - a;
+        if (Number.isFinite(s.stay) && gap < s.stay + (s.travel || 0)) add('err', k, `${nm}：停留 ${fmtDur(s.stay)}＋交通 ${fmtDur(s.travel || 0)} 超過到下一站的時間差，時間對不上。`);
+        else if (s.lat && nx.lat && s.kind !== 'move') {
+          const est = estTravel(s, nx), left = gap - (Number.isFinite(s.stay) ? s.stay : 0);
+          if (est <= 60 && gap > 0 && left < est * 0.6 && !Number.isFinite(s.stay)) add('warn', k, `${nm} → ${plain(nx.name)}：只留 ${gap} 分鐘，交通估算就要約 ${est} 分鐘，會很趕。`);
+        }
+      }
+    });
+    const times = d.stops.map((s) => toMin(s.t)).filter((x) => x !== null);
+    if (times.length > 1) {
+      const span = times[times.length - 1] - times[0];
+      if (span > 13 * 60) add('warn', -1, `這天從 ${fromMin(times[0])} 排到 ${fromMin(times[times.length - 1])}，共 ${fmtDur(span)}，很累。`);
+      if (times[times.length - 1] > 22 * 60 + 30) add('warn', -1, `這天最後一站排到 ${fromMin(times[times.length - 1])}，要想一下末班車。`);
+    }
+    if (i === NDAYS - 1) {
+      const dep = d.stops.find((s) => /前往成田/.test(plain(s.name)));
+      if (dep && toMin(dep.t) !== null && toMin(dep.t) > 18 * 60) add('warn', d.stops.indexOf(dep), `前往成田的時間 ${dep.t} 超過你說的「18:00 前離開市區」，航班時間我不知道，請自己回推（至少起飛前 3 小時到機場）。`);
+      const late = ledger.filter((e) => e.date >= '2026-11-01' && !e.tax);
+      if (late.length) add('info', -1, `購物紀錄有 ${late.length} 筆 11/1 起買的還沒辦退稅：新制要在成田辦海關終端機，之後才能託運行李，要多留約 30 分鐘。`);
+    }
+    return { out, sunset: SUNSET, date: date ? `${date.getMonth() + 1}/${date.getDate()}（週${WD[date.getDay()]}）` : '' };
+  }
+  function renderCheck(i) {
+    const box = $('#dayCheck'); if (!box) return;
+    const r = checkDay(i), n = r.out.length;
+    const ic = { err: '⛔', warn: '⚠️', info: 'ℹ️' };
+    const order = { err: 0, warn: 1, info: 2 };
+    r.out.sort((x, y) => order[x.lv] - order[y.lv]);
+    box.innerHTML = `<details class="chk" ${r.out.some((x) => x.lv === 'err') ? 'open' : ''}><summary>🔍 行程檢查：${n ? `${r.out.filter((x) => x.lv === 'err').length} 個問題、${r.out.filter((x) => x.lv === 'warn').length} 個提醒` : '沒有發現問題'}</summary>
+      ${n ? `<ul>${r.out.map((x) => `<li class="${x.lv}">${ic[x.lv]} ${esc(x.text)}</li>`).join('')}</ul>` : '<p class="src">依已查證的營業時間、日落與交通估算，這天沒有衝突。</p>'}
+      <p class="src">營業時間來自本站已查證的資料，沒查到的景點不會檢查；公休與臨時休館請以官方為準。</p>
+      <button class="btn sm" id="aiBtn" type="button">🤖 AI 建議</button><div class="ai-out" id="aiOut" role="status"></div></details>`;
+    $('#aiBtn').addEventListener('click', async () => {
+      const out = $('#aiOut'), key = localStorage.getItem('tokyo.editkey');
+      if (!key) { out.textContent = '要先到「總覽」開啟雲端同步（輸入編輯密碼），才能用 AI。'; return; }
+      out.textContent = 'AI 分析中…（約 10–20 秒）';
+      try {
+        const res = await fetch('/api/advise', { method: 'POST', headers: { 'content-type': 'application/json', 'x-edit-key': key }, body: JSON.stringify({
+          title: d_title(i), date: r.date, sunset: r.sunset, findings: r.out.map((x) => x.text),
+          stops: T.days[i].stops.map((s) => ({ t: s.t, name: plain(s.name), stay: s.stay, travel: s.travel, note: plain(s.note).slice(0, 160) })),
+        }) });
+        const j = await res.json();
+        out.textContent = res.ok ? j.text : (j.error || 'AI 沒有回應');
+      } catch { out.textContent = '連線失敗，稍後再試。'; }
+    });
+  }
+  const d_title = (i) => plain(T.days[i].title);
 
   /* ---------- 啟動 ---------- */
   tick();
