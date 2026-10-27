@@ -760,7 +760,7 @@
     }));
     const csv = $('#lgCsv');
     if (csv) csv.addEventListener('click', () => {
-      const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const q = (v) => `"${String(v ?? '').replace(/^[=+\-@\t\r]/, "'$&").replace(/"/g, '""')}"`;
       const lines = [['日期', '店家', '品項', '含稅金額(日圓)', '付款方式', '類別', '收據', '已辦退稅', '已核對'].map(q).join(',')]
         .concat(ledger.map((e) => [e.date, e.store, e.item, e.amt, e.pay, e.kind, e.rcpt ? '有' : '', e.tax ? '是' : '', e.chk ? '是' : ''].map(q).join(',')));
       const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -816,7 +816,7 @@
       } catch { msg('網路有問題，沒存到', true); return false; }
     };
     const toMin = (t) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t).trim()); return m ? +m[1] * 60 + +m[2] : null; };
-    const fromMin = (n) => { n = Math.max(0, Math.min(1439, n)); return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`; };
+    const fromMin = (n) => { n = Math.max(0, Math.min(1439, n)); return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`; };
     body.onchange = (e) => {
       if (e.target.id === 'edCas') { localStorage.setItem('tokyo.cascade', e.target.checked ? '1' : '0'); return; }
       if (!e.target.classList.contains('ed-t')) return;
@@ -919,7 +919,11 @@
       sp.forEach((n) => add(n, -e.amt / sp.length));
     });
     const cr = [], de = [];
-    Object.entries(bal).forEach(([n, v]) => { const r = Math.round(v); if (r > 0) cr.push([n, r]); else if (r < 0) de.push([n, -r]); });
+    const rb = Object.fromEntries(Object.entries(bal).map(([n, v]) => [n, Math.round(v)]));
+    const drift = Object.values(rb).reduce((a, v) => a + v, 0);
+    if (drift) { const top = Object.keys(rb).sort((a, b) => rb[b] - rb[a])[0]; rb[top] -= drift; }
+    Object.keys(bal).forEach((n) => { bal[n] = rb[n]; });
+    Object.entries(rb).forEach(([n, r]) => { if (r > 0) cr.push([n, r]); else if (r < 0) de.push([n, -r]); });
     cr.sort((a, b) => b[1] - a[1]); de.sort((a, b) => b[1] - a[1]);
     const tx = [];
     let i = 0, j = 0;

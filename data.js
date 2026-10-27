@@ -2427,6 +2427,7 @@ window.TRIP = {
    {
     "name": "唐吉訶德（澀谷／銀座／淺草）",
     "cat": "elec",
+    "alias": "DONKI Don Quijote ドンキ ドン・キホーテ",
     "area": "全區",
     "ok": "yes",
     "min": "¥5,000",
@@ -2660,7 +2661,7 @@ window.TRIP = {
      "links": [
       [
        "📝 Visit Japan Web",
-       "https://www.vjw.digital.go.jp/"
+       "https://services.digital.go.jp/en/visit-japan-web/"
       ]
      ]
     },
@@ -3032,7 +3033,7 @@ window.TRIP = {
    "name": "Visit Japan Web",
    "book": {
     "label": "登錄",
-    "url": "https://www.vjw.digital.go.jp/",
+    "url": "https://services.digital.go.jp/en/visit-japan-web/",
     "note": "入境審查與海關 QR；11/4 還能用來辦退稅第一步。"
    }
   },
