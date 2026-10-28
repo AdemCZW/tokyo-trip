@@ -811,6 +811,37 @@
     return `<option value="" ${v ? '' : 'selected'}>--:--</option>${raw}` + set.map((m) => `<option value="${fromMin(m)}" ${cur === m ? 'selected' : ''}>${fromMin(m)}</option>`).join('');
   };
 
+
+  /* ---------- 滾輪時間選擇器（底部彈出，時／分兩欄，分鐘 5 分一格） ---------- */
+  function wheelPick({ title, h, m, hMin = 0, hMax = 23, sub }) {
+    return new Promise((done) => {
+      const IH = 44, pad = (n) => String(n).padStart(2, '0');
+      const hs = []; for (let x = hMin; x <= hMax; x++) hs.push(x);
+      const ms = []; for (let x = 0; x < 60; x += 5) ms.push(x);
+      if (!ms.includes(m)) { ms.push(m); ms.sort((a, b) => a - b); }
+      const col = (list, unit) => `<div class="wp-col" tabindex="0">${list.map((v) => `<div class="wp-it">${pad(v)}</div>`).join('')}</div>${unit ? `<span class="wp-unit">${unit}</span>` : ''}`;
+      const mask = document.createElement('div');
+      mask.className = 'wp-mask';
+      mask.innerHTML = `<div class="wp-sheet" role="dialog" aria-label="${title}"><h3>${title}</h3>${sub ? `<p class="wp-sub">${sub}</p>` : ''}
+        <div class="wp-wheels"><div class="wp-bar"></div>${col(hs, sub ? '小時' : '')}<span class="wp-sep">:</span>${col(ms, sub ? '分' : '')}</div>
+        <button class="btn primary wp-ok" type="button">確定</button></div>`;
+      document.body.appendChild(mask);
+      const [ch, cm] = $$('.wp-col', mask);
+      ch.scrollTop = Math.max(0, hs.indexOf(h)) * IH;
+      cm.scrollTop = Math.max(0, ms.indexOf(m)) * IH;
+      const idx = (c, n) => Math.min(n - 1, Math.max(0, Math.round(c.scrollTop / IH)));
+      const close = (v) => { mask.classList.add('out'); setTimeout(() => mask.remove(), 180); done(v); };
+      mask.addEventListener('click', (e) => { if (e.target === mask) close(null); });
+      $('.wp-ok', mask).addEventListener('click', () => close({ h: hs[idx(ch, hs.length)], m: ms[idx(cm, ms.length)] }));
+      // 點某一格也能直接跳過去
+      [[ch, hs], [cm, ms]].forEach(([c]) => c.addEventListener('click', (e) => {
+        const it = e.target.closest('.wp-it'); if (!it) return;
+        c.scrollTo({ top: [...c.children].indexOf(it) * IH, behavior: 'smooth' });
+      }));
+      requestAnimationFrame(() => mask.classList.add('in'));
+    });
+  }
+
   function openEditor(i) {
     const d = T.days[i];
     let rows = d.stops.map((s, k) => ({
@@ -841,15 +872,16 @@
     const msg = (t, bad) => { const m = $('#edMsg'); if (!m) return; m.textContent = t; m.style.color = bad ? 'var(--danger, #ff453a)' : ''; };
     const paint = (note) => {
       body.innerHTML = `<div class="day-intro"><h2 class="h2" style="margin-top:0">✏️ 編輯 Day ${i + 1}</h2>
-        <p>每一站有「開始時間、停留、到下一站的交通」，改任何一個，<b>後面的時間會自動重算</b>。新增、刪除、換順序也一樣。交通時間是用距離估的，可以自己改。</p></div>
+        <p>每一站有「開始時間、停留、到下一站的交通」，改任何一個，<b>後面的時間會自動重算</b>。新增、刪除、換順序也一樣。</p>
+        <p class="ed-warn">⚠️ 標「估」的交通時間是用兩站<b>直線距離</b>推算的（走路 15 分鐘內算走路，其餘算搭電車），不是查詢實際班次，<b>不保證準確</b>。新增的景點要輸入名稱後才會去找位置、估算；出發前請用 Google 地圖的「導航」按鈕再確認，實際時間可以自己改，改過的不會被覆蓋。</p></div>
         <label class="ed-cas"><input type="checkbox" id="edCas" ${localStorage.getItem('tokyo.cascade') === '0' ? '' : 'checked'}> 自動重算後面的時間（停留＋交通）</label>
         <div class="ed-list">${rows.map((r, k) => {
           const end = toMin(r.t) !== null ? fromMin(toMin(r.t) + r.stay) : '';
           return `<div class="ed-row" data-k="${k}">
-          <div class="ed-top">${timeSel(r.t)}
+          <div class="ed-top"><button class="in ed-pick ed-tbtn" type="button" data-f="t" aria-label="開始時間">${r.t || '--:--'}</button>
             <input class="in ed-n" value="${escH(r.name)}" placeholder="景點名稱（日文最準）" maxlength="80" aria-label="名稱"></div>
-          <div class="ed-times"><label>停留 <select class="in ed-s" aria-label="停留時間">${selOpts(STAY_OPTS, r.stay, fmtDur)}</select></label>
-            ${k < rows.length - 1 ? `<label>到下一站 <select class="in ed-v" aria-label="交通時間">${selOpts(TRAVEL_OPTS, r.travel, (m) => (m ? fmtDur(m) : '0 分'))}</select></label>` : ''}
+          <div class="ed-times"><label>停留 <button class="in ed-pick" type="button" data-f="stay">${fmtDur(r.stay)}</button></label>
+            ${k < rows.length - 1 ? `<label>到下一站 <button class="in ed-pick" type="button" data-f="travel">${r.travel ? fmtDur(r.travel) : '0 分'}</button>${r.tm ? '' : '<small class="ed-est">估</small>'}</label>` : ''}
             ${end ? `<span class="ed-end">${end} 離開</span>` : ''}
             <span class="ed-tools"><button class="btn sm" data-a="up" ${k ? '' : 'disabled'} aria-label="上移">↑</button><button class="btn sm" data-a="dn" ${k < rows.length - 1 ? '' : 'disabled'} aria-label="下移">↓</button><button class="btn sm" data-a="ins" aria-label="在後面插入" title="在後面插入">＋</button><button class="btn sm" data-a="rm" aria-label="刪除">🗑</button></span></div>
           <textarea class="in ed-note" rows="2" placeholder="備註" maxlength="1500" aria-label="備註">${escH(r.note)}</textarea></div>`;
@@ -926,6 +958,25 @@
       else if (t.classList.contains('ed-n') && r.orig < 0 && r.name && r.name !== r.gname) lookup(r);
     };
     body.onclick = async (e) => {
+      const pk = e.target.closest('.ed-pick');
+      if (pk) {
+        sync();
+        const k = +pk.closest('.ed-row').dataset.k, r = rows[k], f = pk.dataset.f;
+        if (f === 't') {
+          const cur = toMin(r.t) ?? 9 * 60;
+          const v = await wheelPick({ title: '開始時間', h: Math.floor(cur / 60), m: cur % 60 });
+          if (!v) return;
+          r.t = fromMin(v.h * 60 + v.m);
+        } else {
+          const cur = f === 'stay' ? r.stay : r.travel;
+          const v = await wheelPick({ title: f === 'stay' ? '預計停留時間' : '到下一站的交通時間', sub: f === 'stay' ? '' : '改過的交通時間會保留，不會再被估算覆蓋', h: Math.floor(cur / 60), m: cur % 60, hMax: f === 'stay' ? 12 : 5 });
+          if (!v) return;
+          const n = v.h * 60 + v.m;
+          if (f === 'stay') { r.stay = Math.max(5, n); r.stayAuto = false; } else { r.travel = n; r.tm = true; }
+        }
+        chain(k); paint('後面的時間已重算');
+        return;
+      }
       const b = e.target.closest('[data-a]'); if (!b) return;
       const a = b.dataset.a, k = +(b.closest('.ed-row')?.dataset.k ?? -1);
       if (a === 'cancel') { body.onclick = null; body.onchange = null; renderDay(i); return; }

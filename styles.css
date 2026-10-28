@@ -775,3 +775,24 @@ select.in { appearance: none; -webkit-appearance: none; }
 .ai-out { margin-top: 10px; font-size: 14px; line-height: 1.7; white-space: pre-wrap; color: var(--text); }
 .ed-time { display: inline-flex; gap: 4px; flex: none; }
 .ed-time select.in { width: auto; padding: 8px 6px; font-variant-numeric: tabular-nums; }
+
+/* ---- 滾輪時間選擇器 ---- */
+.ed-pick { width: auto; cursor: pointer; text-align: center; font: inherit; font-variant-numeric: tabular-nums; padding: 8px 12px; color: inherit; }
+.ed-tbtn { flex: none; min-width: 78px; font-weight: 650; }
+.ed-est { font-size: 11px; color: #c77700; border: 1px solid currentColor; border-radius: 6px; padding: 0 4px; }
+.ed-warn { margin-top: 8px !important; font-size: 12.5px; color: var(--muted); }
+.wp-mask { position: fixed; inset: 0; z-index: 3000; background: rgba(0, 0, 0, 0); display: flex; align-items: flex-end; justify-content: center; transition: background .18s; }
+.wp-mask.in { background: rgba(0, 0, 0, .35); }
+.wp-mask.out { background: rgba(0, 0, 0, 0); }
+.wp-sheet { width: min(520px, 100%); background: var(--glass-strong, #fff); border-radius: 26px 26px 0 0; padding: 22px 20px calc(20px + env(safe-area-inset-bottom)); transform: translateY(100%); transition: transform .22s var(--ease-out, ease); box-shadow: 0 -10px 40px rgba(0,0,0,.18); }
+.wp-mask.in .wp-sheet { transform: none; } .wp-mask.out .wp-sheet { transform: translateY(100%); }
+.wp-sheet h3 { text-align: center; font-size: 22px; margin: 0 0 6px; }
+.wp-sub { text-align: center; font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+.wp-wheels { position: relative; display: flex; justify-content: center; align-items: center; gap: 6px; height: 220px; margin: 10px 0 18px; border-radius: 18px; background: color-mix(in srgb, var(--text) 5%, transparent); overflow: hidden; }
+.wp-bar { position: absolute; left: 50%; transform: translateX(-50%); top: 88px; height: 44px; width: 240px; border-radius: 12px; background: color-mix(in srgb, var(--text) 8%, transparent); pointer-events: none; }
+.wp-col { height: 220px; width: 76px; overflow-y: scroll; scroll-snap-type: y mandatory; padding: 88px 0; box-sizing: border-box; scrollbar-width: none; -webkit-mask-image: linear-gradient(transparent, #000 35%, #000 65%, transparent); mask-image: linear-gradient(transparent, #000 35%, #000 65%, transparent); position: relative; z-index: 1; }
+.wp-col::-webkit-scrollbar { display: none; }
+.wp-it { height: 44px; line-height: 44px; text-align: center; font-size: 26px; font-variant-numeric: tabular-nums; scroll-snap-align: center; cursor: pointer; }
+.wp-sep { font-size: 26px; font-weight: 600; position: relative; z-index: 1; }
+.wp-unit { font-size: 14px; color: var(--muted); margin-left: -4px; position: relative; z-index: 1; }
+.wp-ok { width: 100%; justify-content: center; padding: 14px; font-size: 17px; }
