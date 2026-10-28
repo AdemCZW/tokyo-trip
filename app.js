@@ -352,10 +352,10 @@
   function renderTabs() {
     $('#dayTabs').innerHTML = T.days.map((d, i) => {
       const date = store.start ? fmtDay(addDays(store.start, i)) : '';
-      return `<button class="day-tab ${i === curDay ? 'on' : ''}" role="tab" style="--c:${DAY_COLORS[i]}" data-i="${i}">
-        <span class="d">DAY ${i + 1}${date ? ` · ${date}` : ''}</span>
-        <span class="t">${d.title}</span><span class="w">${d.area}</span></button>`;
-    }).join('');
+      const dt = store.start ? addDays(store.start, i) : null;
+      return `<button class="day-tab ${i === curDay ? 'on' : ''}" role="tab" aria-selected="${i === curDay}" style="--c:${DAY_COLORS[i]}" data-i="${i}" title="${plain(d.title)}">
+        <span class="n">D${i + 1}</span><span class="dd">${dt ? `${dt.getMonth() + 1}/${dt.getDate()}<i>${'日一二三四五六'[dt.getDay()]}</i>` : ''}</span></button>`;
+    }).join('') + '<span class="dt-ind" aria-hidden="true"></span>';
     $$('.day-tab').forEach((b) => b.addEventListener('click', () => {
       renderDay(+b.dataset.i);
       // 換天時回到這天的開頭（天數列是固定在上面的，不用再滑回頂端）
@@ -377,6 +377,9 @@
     tabs.scrollTo({ left: tabs.scrollLeft + dx - (tabs.clientWidth - tab.offsetWidth) / 2, behavior: 'smooth' });
     const d = T.days[i];
     const c = DAY_COLORS[i];
+    // 選中的天：滑動的色塊跟過去
+    const ind = $('#dayTabs .dt-ind');
+    if (ind && tab) { ind.style.setProperty('--c', c); ind.style.width = tab.offsetWidth + 'px'; ind.style.transform = `translateX(${tab.offsetLeft}px)`; }
     const pts = (dayPts = d.stops.filter((s) => s.lat));
     const route = pts.length > 1
       ? `https://www.google.com/maps/dir/?api=1&origin=${pts[0].lat},${pts[0].lng}&destination=${pts.at(-1).lat},${pts.at(-1).lng}` +
@@ -384,11 +387,15 @@
       : '';
     let n = 0;
     $('#dayBody').innerHTML = `
-      <div class="day-intro"><h2 class="h2" style="margin-top:0">${d.title}</h2><p>${d.summary}</p></div>
-      <div class="day-actions">
-        ${route ? `<a class="btn primary sm" target="_blank" rel="noopener" href="${route}">➜ 整天導航</a>` : ''}
-        <button class="btn sm" id="editDay" type="button">✏️ 編輯</button>
-        ${pills(d.tags)}
+      <div class="day-intro" style="--c:${c}">
+        <div class="di-day">DAY ${i + 1}${store.start ? ` · ${fmtDay(addDays(store.start, i))}` : ''}</div>
+        <h2 class="h2">${d.title}</h2>
+        <p>${d.summary}</p>
+        ${(d.tags || []).length ? `<div class="di-tags">${pills(d.tags)}</div>` : ''}
+        <div class="di-acts">
+          ${route ? `<a class="btn primary" target="_blank" rel="noopener" href="${route}">➜ 整天導航</a>` : ''}
+          <button class="btn" id="editDay" type="button">✏️ 編輯行程</button>
+        </div>
       </div>
       <div id="dayCheck"></div>
       <ol class="tl">${d.stops.map((s) => {
@@ -401,6 +408,7 @@
           </div></li>`;
       }).join('')}</ol>`;
     $('#daySide').innerHTML = `<h3>${d.side.title}</h3>${list(d.side.items)}`;
+    const db = $('#dayBody'); db.classList.remove('swap'); void db.offsetWidth; db.classList.add('swap');
     $('#editDay').addEventListener('click', () => openEditor(i));
     renderCheck(i);
 
