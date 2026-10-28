@@ -919,7 +919,7 @@
       const key = localStorage.getItem('tokyo.editkey');
       if (!key) { if (!quiet) msg('名稱已改。開啟雲端同步後，會自動找位置、寫介紹、估算交通時間。'); return; }
       const ask = r.name;
-      if (!quiet) msg(`AI 正在查「${ask}」…（約 5–15 秒）`);
+      if (!quiet) msg(`AI 正在查「${ask}」…（約 10–30 秒）`);
       try {
         const { prev, next } = near(r);
         const g = await (await fetch('/api/place', { method: 'POST', headers: { 'content-type': 'application/json', 'x-edit-key': key }, body: JSON.stringify({
