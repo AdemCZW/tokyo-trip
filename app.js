@@ -398,17 +398,26 @@
         </div>
       </div>
       <div id="dayCheck"></div>
-      <ol class="tl">${d.stops.map((s) => {
+      <ol class="tlx">${d.stops.map((s) => {
         const idx = s.lat ? ++n : 0;
-        return `<li style="--c:${c}" data-t="${toMin(s.t) ?? ''}" data-stay="${s.stay || ''}" class="${s.kind === 'move' ? 'mv' : ''}"><div class="time"><b>${s.t || ''}</b>${s.stay ? `<small>${fmtDur(s.stay)}</small>` : ''}<em class="now-tag"></em></div>
-          <div class="stop ${s.kind || ''}" style="--c:${c}" data-idx="${idx}">
-            <div class="row1"><span class="nm">${idx ? `${idx}. ` : ''}${s.name}</span>${s.it ? `<span class="it">${s.it}</span>` : ''}</div>
-            ${s.note ? `<div class="note">${s.note}</div>` : ''}
-            ${s.tags || s.lat || s.q || s.stay ? `<div class="meta">${pills(s.tags)}${s.stay ? `<span class="pill">停留 ${fmtDur(s.stay)}</span>` : ''}<span class="go">${bookBtn(s.book)}${navBtn(s, s.mode || d.mode || 'walking')}</span></div>` : ''}
+        const kind = { sight: '景點', food: '吃', move: '移動', shop: '逛' }[s.kind] || '';
+        return `<li class="tlx-i ${s.kind === 'move' ? 'mv' : ''}" style="--c:${c}" data-t="${toMin(s.t) ?? ''}" data-stay="${s.stay || ''}">
+          <span class="tlx-node" aria-hidden="true"></span>
+          <div class="stop ${s.kind || ''}" data-idx="${idx}">
+            <div class="st-head"><span class="st-time">${s.t || '--:--'}</span>${s.stay ? `<span class="st-dur">${fmtDur(s.stay)}</span>` : ''}<em class="now-tag"></em>${kind ? `<span class="st-kind">${idx ? `${idx} · ` : ''}${kind}</span>` : ''}</div>
+            <div class="nm">${s.name}</div>${s.it ? `<div class="it">${s.it}</div>` : ''}
+            ${s.note ? `<div class="note clamp">${s.note}</div><button class="st-more" type="button" hidden>展開全文</button>` : ''}
+            ${s.tags || s.lat || s.q || s.book ? `<div class="meta">${pills(s.tags)}<span class="go">${bookBtn(s.book)}${navBtn(s, s.mode || d.mode || 'walking')}</span></div>` : ''}
           </div></li>`;
       }).join('')}</ol>`;
     $('#daySide').innerHTML = `<h3>${d.side.title}</h3>${list(d.side.items)}`;
     const db = $('#dayBody'); db.classList.remove('swap'); void db.offsetWidth; db.classList.add('swap');
+    requestAnimationFrame(() => $$('#dayBody .note.clamp').forEach((nt) => {
+      const btn = nt.nextElementSibling;
+      if (!btn || !btn.classList.contains('st-more')) return;
+      btn.hidden = nt.scrollHeight <= nt.clientHeight + 2;
+      btn.onclick = (e) => { e.stopPropagation(); const open = nt.classList.toggle('clamp'); btn.textContent = open ? '展開全文' : '收起'; };
+    }));
     $('#editDay').addEventListener('click', () => openEditor(i));
     renderCheck(i);
     markNow(true);
@@ -1373,7 +1382,7 @@
   };
   let nowScrolled = false;
   function markNow(fromRender) {
-    const lis = $$('#dayBody .tl > li');
+    const lis = $$('#dayBody .tlx > li');
     lis.forEach((li) => { li.classList.remove('past', 'now', 'next'); li.style.removeProperty('--p'); $('.now-tag', li).textContent = ''; });
     $$('.day-tab').forEach((b) => b.classList.toggle('today', +b.dataset.i === tripDayIndex()));
     if (tripDayIndex() !== curDay || !lis.length) return;
