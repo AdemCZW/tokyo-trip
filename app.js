@@ -788,12 +788,21 @@
     const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLn / 2) ** 2;
     const d = 2 * 6371 * Math.asin(Math.sqrt(h)) * 1.3;
     const walk = (d / 4.8) * 60;
-    const m = walk <= 15 ? walk : 12 + (d / (d > 30 ? 75 : d > 15 ? 35 : 25)) * 60;
+    // 走路 15 分鐘內就走路；再遠搭電車：等車＋進出站約 10 分，市區約時速 25 公里、郊外快車約 60 公里
+    const m = walk <= 15 ? walk : 10 + (d / (d > 30 ? 60 : 25)) * 60;
     return Math.min(180, Math.max(5, Math.round(m / 5) * 5));
   }
   const STAY_OPTS = [5, 10, 15, 20, 25, 30, 45, 60, 75, 90, 105, 120, 150, 180, 210, 240, 300, 360, 480];
   const TRAVEL_OPTS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 75, 90, 105, 120, 150, 180];
   const selOpts = (list, v, fmt) => [...new Set([...list, v])].sort((x, y) => x - y).map((m) => `<option value="${m}" ${m === v ? 'selected' : ''}>${fmt(m)}</option>`).join('');
+  const timeSel = (v) => {
+    const cur = toMin(v), h = cur === null ? -1 : Math.floor(cur / 60), mi = cur === null ? -1 : cur % 60;
+    const hs = ['<option value="">--</option>'];
+    for (let x = 4; x < 24; x++) hs.push(`<option value="${x}" ${x === h ? 'selected' : ''}>${String(x).padStart(2, '0')} 時</option>`);
+    const ms = [...new Set([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, ...(mi >= 0 ? [mi] : [])])].sort((a, b) => a - b)
+      .map((x) => `<option value="${x}" ${x === mi ? 'selected' : ''}>${String(x).padStart(2, '0')} 分</option>`);
+    return `<span class="ed-time"><select class="in ed-h" aria-label="開始（時）">${hs.join('')}</select><select class="in ed-m" aria-label="開始（分）">${ms.join('')}</select></span>`;
+  };
   const timeOpts = (v) => {
     const cur = toMin(v), set = [];
     for (let m = 240; m < 1440; m += 5) set.push(m);
@@ -837,7 +846,7 @@
         <div class="ed-list">${rows.map((r, k) => {
           const end = toMin(r.t) !== null ? fromMin(toMin(r.t) + r.stay) : '';
           return `<div class="ed-row" data-k="${k}">
-          <div class="ed-top"><select class="in ed-t" aria-label="開始時間">${timeOpts(r.t)}</select>
+          <div class="ed-top">${timeSel(r.t)}
             <input class="in ed-n" value="${escH(r.name)}" placeholder="景點名稱（日文最準）" maxlength="80" aria-label="名稱"></div>
           <div class="ed-times"><label>停留 <select class="in ed-s" aria-label="停留時間">${selOpts(STAY_OPTS, r.stay, fmtDur)}</select></label>
             ${k < rows.length - 1 ? `<label>到下一站 <select class="in ed-v" aria-label="交通時間">${selOpts(TRAVEL_OPTS, r.travel, (m) => (m ? fmtDur(m) : '0 分'))}</select></label>` : ''}
@@ -871,7 +880,35 @@
         return true;
       } catch { msg('網路有問題，沒存到', true); return false; }
     };
-    const blank = (t, travel) => ({ orig: -1, t, name: '', it: '', note: '', stay: 60, travel });
+    const blank = (t, travel) => ({ orig: -1, t, name: '', it: '', note: '', stay: 60, travel, stayAuto: true });
+    // 新景點：AI 轉成日文正式名稱＋寫介紹＋建議停留，再找離前後站最近的座標，重算前後交通
+    const near = (r) => { const k = rows.indexOf(r); return { k, prev: rows[k - 1], next: rows[k + 1] }; };
+    async function lookup(r, quiet) {
+      const key = localStorage.getItem('tokyo.editkey');
+      if (!key) { if (!quiet) msg('名稱已改。開啟雲端同步後，會自動找位置、寫介紹、估算交通時間。'); return; }
+      const ask = r.name;
+      if (!quiet) msg(`AI 正在查「${ask}」…（約 5–15 秒）`);
+      try {
+        const { prev, next } = near(r);
+        const g = await (await fetch('/api/place', { method: 'POST', headers: { 'content-type': 'application/json', 'x-edit-key': key }, body: JSON.stringify({
+          name: ask, area: plain(d.area), prevName: prev && prev.name, nextName: next && next.name,
+          prev: prev && prev.lat ? { lat: prev.lat, lng: prev.lng } : null, next: next && next.lat ? { lat: next.lat, lng: next.lng } : null,
+        }) })).json();
+        if (r.name !== ask || !rows.includes(r)) return; // 查的時候名稱又改了或被刪了
+        sync();
+        const done = [];
+        if (g.lat) { r.lat = g.lat; r.lng = g.lng; r.gname = r.name; done.push('找到位置'); } else { r.lat = r.lng = undefined; r.gname = undefined; }
+        if (g.ja && !r.it) { r.it = g.ja; }
+        if (g.desc && !r.note.trim()) { r.note = r.noteText = `${g.desc}\n（AI 產生的介紹，營業時間與票價請自己確認）`; done.push('寫了介紹'); }
+        if (g.stay && r.stayAuto) { r.stay = g.stay; done.push(`建議停留 ${fmtDur(g.stay)}`); }
+        const k = rows.indexOf(r);
+        if (k > 0) rows[k - 1].tm = false;
+        r.tm = false;
+        reest(k - 1); reest(k); chain(k - 1);
+        const tv = `前一站到這裡 ${k ? fmtDur(rows[k - 1].travel) : '—'}、到下一站 ${k < rows.length - 1 ? fmtDur(r.travel) : '—'}`;
+        paint(g.lat ? `${done.join('、')}；交通用距離估算（${tv}），後面的時間已重算` : `${done.length ? done.join('、') + '；' : ''}找不到位置（可改用日文名稱），交通時間請自己選`);
+      } catch { if (!quiet) msg('AI 查詢失敗，交通時間請自己選。'); }
+    }
     body.onchange = async (e) => {
       const t = e.target;
       if (t.id === 'edCas') { localStorage.setItem('tokyo.cascade', t.checked ? '1' : '0'); return; }
@@ -879,22 +916,14 @@
       if (!row) return;
       sync();
       const k = +row.dataset.k, r = rows[k];
-      if (t.classList.contains('ed-t')) { r.t = t.value; chain(k); paint('後面的時間已重算'); }
-      else if (t.classList.contains('ed-s')) { r.stay = +t.value; chain(k); paint('後面的時間已重算'); }
-      else if (t.classList.contains('ed-v')) { r.travel = +t.value; r.tm = true; chain(k); paint('後面的時間已重算'); }
-      else if (t.classList.contains('ed-n') && r.orig < 0 && r.name && r.name !== r.gname) {
-        const key = localStorage.getItem('tokyo.editkey');
-        if (!key) return msg('名稱已改。開啟雲端同步後，會自動找位置並估算交通時間。');
-        msg('找位置中…');
-        try {
-          const g = await (await fetch('/api/geo?q=' + encodeURIComponent(r.name), { headers: { 'x-edit-key': key } })).json();
-          if (g.lat) {
-            r.lat = g.lat; r.lng = g.lng; r.gname = r.name;
-            reest(k - 1); reest(k); chain(k - 1);
-            paint(`找到位置，前後的交通時間已用距離估算（前一站到這裡 ${k ? rows[k - 1].travel : '—'} 分、到下一站 ${k < rows.length - 1 ? r.travel : '—'} 分），後面的時間已重算`);
-          } else msg('找不到這個地名的位置，導航會用名稱搜尋；交通時間請自己選。');
-        } catch { msg('找位置失敗，交通時間請自己選。'); }
+      if (t.classList.contains('ed-h') || t.classList.contains('ed-m')) {
+        const hh = $('.ed-h', row).value, mm = $('.ed-m', row).value;
+        r.t = hh === '' ? '' : fromMin(+hh * 60 + (+mm || 0));
+        chain(k); paint('後面的時間已重算');
       }
+      else if (t.classList.contains('ed-s')) { r.stay = +t.value; r.stayAuto = false; chain(k); paint('後面的時間已重算'); }
+      else if (t.classList.contains('ed-v')) { r.travel = +t.value; r.tm = true; chain(k); paint('後面的時間已重算'); }
+      else if (t.classList.contains('ed-n') && r.orig < 0 && r.name && r.name !== r.gname) lookup(r);
     };
     body.onclick = async (e) => {
       const b = e.target.closest('[data-a]'); if (!b) return;
@@ -905,13 +934,14 @@
         const j = a === 'up' ? k - 1 : k + 1, lo = Math.min(k, j), t0 = rows[lo].t;
         [rows[k], rows[j]] = [rows[j], rows[k]];
         rows[lo].t = t0;
+        [lo - 1, lo, lo + 1].forEach((x) => { if (rows[x]) rows[x].tm = false; });
         if (auto()) { reest(lo - 1); reest(lo); reest(lo + 1); chain(Math.max(0, lo - 1)); }
         paint(auto() ? '已換位，前後的交通與時間已重算' : '已換位');
       } else if (a === 'rm') {
         const gone = rows[k];
         rows.splice(k, 1);
         if (auto() && rows.length) {
-          if (k > 0) { reest(k - 1); chain(k - 1); }
+          if (k > 0) { rows[k - 1].tm = false; reest(k - 1); chain(k - 1); }
           else if (rows[0] && toMin(gone.t) !== null) { rows[0].t = gone.t; chain(0); }
         }
         paint(auto() ? `已刪除，後面的時間往前移（省下 ${fmtDur((gone.stay || 0) + (gone.travel || 0))}）` : '已刪除');
@@ -923,6 +953,7 @@
         nr.t = at !== null ? fromMin(at + prev.stay + prev.travel) : '';
         rows.splice(k + 1, 0, nr);
         if (k + 2 >= rows.length) nr.travel = 0;
+        if (prev.lat && rows[k + 2] && rows[k + 2].lat) nr.travel = 15;
         chain(k);
         paint(auto() ? '已插入：開始時間＝上一站離開＋交通 15 分。填名稱後會自動找位置、重算交通；後面的行程已順延' : '已插入（沒勾自動重算，後面時間不變）');
         $$('.ed-n', body)[k + 1].focus();
@@ -950,6 +981,9 @@
     };
     paint();
     body.scrollIntoView({ block: 'nearest' });
+    const far = (a, b) => a && b && a.lat && b.lat && Math.hypot((a.lat - b.lat) * 111, (a.lng - b.lng) * 91) > 25;
+    rows.filter((r, k) => r.orig < 0 && r.lat && (rows[k - 1] || rows[k + 1]) && (!rows[k - 1] || far(r, rows[k - 1])) && (!rows[k + 1] || far(r, rows[k + 1])))
+      .forEach((r) => { msg(`「${r.name}」的位置離前後站太遠，可能找錯了，重新查詢中…`); lookup(r, true); });
   }
   async function syncCloud() {
     try {

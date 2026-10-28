@@ -773,3 +773,5 @@ select.in { appearance: none; -webkit-appearance: none; }
 .chk li.warn { background: color-mix(in srgb, #ff9f0a 16%, transparent); }
 .chk .btn { margin-top: 6px; }
 .ai-out { margin-top: 10px; font-size: 14px; line-height: 1.7; white-space: pre-wrap; color: var(--text); }
+.ed-time { display: inline-flex; gap: 4px; flex: none; }
+.ed-time select.in { width: auto; padding: 8px 6px; font-variant-numeric: tabular-nums; }
