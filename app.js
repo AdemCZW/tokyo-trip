@@ -400,7 +400,7 @@
       <div id="dayCheck"></div>
       <ol class="tl">${d.stops.map((s) => {
         const idx = s.lat ? ++n : 0;
-        return `<li><div class="time">${s.t || ''}</div>
+        return `<li style="--c:${c}" data-t="${toMin(s.t) ?? ''}" data-stay="${s.stay || ''}" class="${s.kind === 'move' ? 'mv' : ''}"><div class="time"><b>${s.t || ''}</b>${s.stay ? `<small>${fmtDur(s.stay)}</small>` : ''}<em class="now-tag"></em></div>
           <div class="stop ${s.kind || ''}" style="--c:${c}" data-idx="${idx}">
             <div class="row1"><span class="nm">${idx ? `${idx}. ` : ''}${s.name}</span>${s.it ? `<span class="it">${s.it}</span>` : ''}</div>
             ${s.note ? `<div class="note">${s.note}</div>` : ''}
@@ -411,6 +411,7 @@
     const db = $('#dayBody'); db.classList.remove('swap'); void db.offsetWidth; db.classList.add('swap');
     $('#editDay').addEventListener('click', () => openEditor(i));
     renderCheck(i);
+    markNow(true);
 
     if (!dayMap) dayMap = makeMap('dayMap');
     if (dayLayer) dayLayer.remove();
@@ -1357,11 +1358,53 @@
     t.classList.toggle('stuck', $('#plan').scrollTop > $('#dayTabsMark').offsetTop + 4);
   }, { passive: true });
 
+  /* ---------- 行程「現在進行中」：旅行當天依東京時間標出已完成／進行中／下一站 ---------- */
+  function tokyoNow() {
+    const q = new URLSearchParams(location.search).get('now'); // 測試用：?now=2026-10-29T10:30
+    if (q && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(q)) return { date: q.slice(0, 10), min: +q.slice(11, 13) * 60 + +q.slice(14, 16) };
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+    return { date: `${p.year}-${p.month}-${p.day}`, min: +p.hour * 60 + +p.minute };
+  }
+  const tripDayIndex = () => {
+    if (!store.start) return -1;
+    const n = tokyoNow();
+    for (let k = 0; k < NDAYS; k++) if (isoOf(addDays(store.start, k)) === n.date) return k;
+    return -1;
+  };
+  let nowScrolled = false;
+  function markNow(fromRender) {
+    const lis = $$('#dayBody .tl > li');
+    lis.forEach((li) => { li.classList.remove('past', 'now', 'next'); li.style.removeProperty('--p'); $('.now-tag', li).textContent = ''; });
+    $$('.day-tab').forEach((b) => b.classList.toggle('today', +b.dataset.i === tripDayIndex()));
+    if (tripDayIndex() !== curDay || !lis.length) return;
+    const now = tokyoNow().min;
+    const starts = lis.map((li) => (li.dataset.t === '' ? null : +li.dataset.t));
+    let cur = -1;
+    lis.forEach((li, k) => {
+      const a = starts[k];
+      if (a === null) return;
+      let b = null;
+      for (let j = k + 1; j < lis.length; j++) if (starts[j] !== null) { b = starts[j]; break; }
+      if (b === null) b = a + (+li.dataset.stay || 60);
+      if (now >= b) li.classList.add('past');
+      else if (now >= a) { li.classList.add('now'); li.style.setProperty('--p', Math.min(1, (now - a) / Math.max(1, b - a)).toFixed(3)); $('.now-tag', li).textContent = '進行中'; cur = k; }
+    });
+    const nx = lis.findIndex((li, k) => starts[k] !== null && starts[k] > now);
+    if (nx >= 0) { lis[nx].classList.add('next'); $('.now-tag', lis[nx]).textContent = `${fmtDur(starts[nx] - now)}後`; }
+    // 打開網站時自動捲到正在進行的那一站（只捲一次）
+    const target = lis[cur >= 0 ? cur : nx];
+    if (fromRender && !nowScrolled && target && location.hash === '#plan') {
+      nowScrolled = true;
+      setTimeout(() => { const pg = $('#plan'); pg.scrollTo({ top: target.offsetTop - 150, behavior: 'smooth' }); }, 400);
+    }
+  }
+  setInterval(() => markNow(false), 60000);
+
   /* ---------- 啟動 ---------- */
   tick();
   setInterval(tick, 15000);
   renderTabs();
-  renderDay(0);
+  renderDay(Math.max(0, tripDayIndex()));
   renderBigMap();
   renderFood();
   renderGuideSeg();
