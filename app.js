@@ -356,7 +356,12 @@
         <span class="d">DAY ${i + 1}${date ? ` · ${date}` : ''}</span>
         <span class="t">${d.title}</span><span class="w">${d.area}</span></button>`;
     }).join('');
-    $$('.day-tab').forEach((b) => b.addEventListener('click', () => renderDay(+b.dataset.i)));
+    $$('.day-tab').forEach((b) => b.addEventListener('click', () => {
+      renderDay(+b.dataset.i);
+      // 換天時回到這天的開頭（天數列是固定在上面的，不用再滑回頂端）
+      const pg = $('#plan'), tabs = $('#dayTabs');
+      if (pg.scrollTop > $('#dayTabsMark').offsetTop) pg.scrollTo({ top: 0, behavior: 'smooth' });
+    }));
   }
   function fitDay() {
     dayMap.invalidateSize();
@@ -1337,6 +1342,12 @@
     });
   }
   const d_title = (i) => plain(T.days[i].title);
+
+  // 天數列黏在上面時縮小、加底色
+  $('#plan').addEventListener('scroll', () => {
+    const t = $('#dayTabs');
+    t.classList.toggle('stuck', $('#plan').scrollTop > $('#dayTabsMark').offsetTop + 4);
+  }, { passive: true });
 
   /* ---------- 啟動 ---------- */
   tick();
