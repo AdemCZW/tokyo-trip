@@ -854,6 +854,8 @@
       const nx = rows[k + 1];
       if (!nx) { r.travel = 0; r.stay = r.stay || 60; return; }
       if (Number.isFinite(r.stay) && Number.isFinite(r.travel)) return;
+      const g0 = toMin(nx.t) !== null && toMin(r.t) !== null ? toMin(nx.t) - toMin(r.t) : null;
+      if (Number.isFinite(r.stay) && g0 !== null && g0 >= r.stay) { r.travel = g0 - r.stay; return; }
       const gap = toMin(nx.t) !== null && toMin(r.t) !== null ? toMin(nx.t) - toMin(r.t) : null;
       const est = estTravel(r, nx);
       if (gap !== null && gap > 0) { r.travel = Math.min(est, Math.max(0, gap - 5)); r.stay = gap - r.travel; }
@@ -1272,10 +1274,10 @@
     const sun = toMin(SUNSET);
     d.stops.forEach((s, k) => {
       const nm = plain(s.name), a = toMin(s.t);
-      const h = HOURS.find((x) => nm.includes(x.m));
+      const h = s.hours ? { ...s.hours, out: s.kind === 'sight' && /寺|神社|公園|海|街|通|坂|湖|瀑布|橫丁|散步/.test(nm) ? 1 : 0 } : HOURS.find((x) => nm.includes(x.m));
       const stay = Number.isFinite(s.stay) ? s.stay : (d.stops[k + 1] && toMin(d.stops[k + 1].t) !== null && a !== null ? Math.max(0, toMin(d.stops[k + 1].t) - a) : 0);
       if (h && a !== null) {
-        if (dow !== null && (h.closed || []).includes(dow)) add('err', k, `${nm}：週${WD[dow]}公休，這天去會撲空。`);
+        if (dow !== null && (h.closed || []).map(Number).includes(dow)) add('err', k, `${nm}：週${WD[dow]}公休，這天去會撲空。`);
         const close = toMin((dow !== null && h.cw && h.cw[dow]) || h.c);
         const last = h.last ? toMin(h.last) : h.lastBefore && close ? close - h.lastBefore : null;
         if (h.o && a < toMin(h.o)) add('info', k, `${nm}：${s.t} 抵達，但 ${h.o} 才開，要等 ${fmtDur(toMin(h.o) - a)}。`);
@@ -1284,7 +1286,7 @@
         else if (close !== null && stay && a + stay > close) add('warn', k, `${nm}：預計待到 ${fromMin(a + stay)}，但 ${fromMin(close)} 關門，要提早離開。`);
         else if (close !== null && close - a <= 45) add('info', k, `${nm}：${fromMin(close)} 關門，只剩 ${close - a} 分鐘。`);
       }
-      if ((h && h.out || /公園|神社|寺|海邊|商店街|通り|銀座・|橫丁/.test(nm)) && a !== null && a >= sun + 10 && !/晚餐|午餐|夜景|SKY|塔/.test(nm)) add('warn', k, `${nm}：${s.t} 才到，天黑了（日落約 ${SUNSET}），戶外景點看不到什麼。`);
+      if ((h && h.out || /公園|神社|寺|海邊|商店街|通り|銀座・|橫丁/.test(nm)) && a !== null && a >= sun + 10 && !/晚餐|午餐|夜景|SKY|塔|光雕|點燈|煙火|遊行|夜間/.test(nm)) add('warn', k, `${nm}：${s.t} 才到，天黑了（日落約 ${SUNSET}），戶外景點看不到什麼。`);
       const nx = d.stops[k + 1];
       if (nx && a !== null && toMin(nx.t) !== null) {
         const gap = toMin(nx.t) - a;
@@ -1302,8 +1304,9 @@
       if (times[times.length - 1] > 22 * 60 + 30) add('warn', -1, `這天最後一站排到 ${fromMin(times[times.length - 1])}，要想一下末班車。`);
     }
     if (i === NDAYS - 1) {
-      const dep = d.stops.find((s) => /前往成田/.test(plain(s.name)));
-      if (dep && toMin(dep.t) !== null && toMin(dep.t) > 18 * 60) add('warn', d.stops.indexOf(dep), `前往成田的時間 ${dep.t} 超過你說的「18:00 前離開市區」，航班時間我不知道，請自己回推（至少起飛前 3 小時到機場）。`);
+      const fly = d.stops.find((s) => /起飛/.test(plain(s.name)));
+      const ap = d.stops.find((s) => /成田機場/.test(plain(s.name)) && !/前往/.test(plain(s.name)));
+      if (fly && ap && toMin(fly.t) !== null && toMin(ap.t) !== null && toMin(fly.t) - toMin(ap.t) < 150) add('warn', d.stops.indexOf(ap), `${ap.t} 才到成田，離起飛 ${fly.t} 不到 2.5 小時；11/1 起買的免稅品要先辦退稅再託運，建議再提早。`);
       const late = ledger.filter((e) => e.date >= '2026-11-01' && !e.tax);
       if (late.length) add('info', -1, `購物紀錄有 ${late.length} 筆 11/1 起買的還沒辦退稅：新制要在成田辦海關終端機，之後才能託運行李，要多留約 30 分鐘。`);
     }
