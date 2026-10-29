@@ -1345,12 +1345,15 @@
       if (h && a !== null) {
         if (dow !== null && (h.closed || []).map(Number).includes(dow)) add('err', k, `${nm}：週${WD[dow]}公休，這天去會撲空。`);
         const close = toMin((dow !== null && h.cw && h.cw[dow]) || h.c);
-        const last = h.last ? toMin(h.last) : h.lastBefore && close ? close - h.lastBefore : null;
+        // 營業到半夜（例如 01:00）：關門時間比開門早，就當作隔天
+        const open0 = h.o ? toMin(h.o) : null;
+        const closeX = close !== null && open0 !== null && close < open0 ? close + 1440 : close;
+        const last = h.last ? toMin(h.last) : h.lastBefore && closeX ? closeX - h.lastBefore : null;
         if (h.o && a < toMin(h.o)) add('info', k, `${nm}：${s.t} 抵達，但 ${h.o} 才開，要等 ${fmtDur(toMin(h.o) - a)}。`);
-        if (close !== null && a >= close) add('err', k, `${nm}：${s.t} 才到，已經過了關門時間 ${fromMin(close)}。`);
+        if (closeX !== null && a >= closeX) add('err', k, `${nm}：${s.t} 才到，已經過了關門時間 ${fromMin(close)}。`);
         else if (last !== null && a > last) add('err', k, `${nm}：最後入場 ${fromMin(last)}，${s.t} 到會進不去。`);
-        else if (close !== null && stay && a + stay > close) add('warn', k, `${nm}：預計待到 ${fromMin(a + stay)}，但 ${fromMin(close)} 關門，要提早離開。`);
-        else if (close !== null && close - a <= 45) add('info', k, `${nm}：${fromMin(close)} 關門，只剩 ${close - a} 分鐘。`);
+        else if (closeX !== null && stay && a + stay > closeX) add('warn', k, `${nm}：預計待到 ${fromMin(a + stay)}，但 ${fromMin(close)} 關門，要提早離開。`);
+        else if (closeX !== null && closeX - a <= 45) add('info', k, `${nm}：${fromMin(close)} 關門，只剩 ${closeX - a} 分鐘。`);
       }
       if ((h && h.out || /公園|神社|寺|海邊|商店街|通り|銀座・|橫丁/.test(nm)) && a !== null && a >= sun + 10 && !/晚餐|午餐|夜景|SKY|塔|光雕|點燈|煙火|遊行|夜間/.test(nm)) add('warn', k, `${nm}：${s.t} 才到，天黑了（日落約 ${SUNSET}），戶外景點看不到什麼。`);
       const nx = d.stops[k + 1];
