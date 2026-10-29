@@ -5,17 +5,24 @@
   const T = window.TRIP;
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-  const TOKYO = [35.6812, 139.7671];
+  // 城市設定：東京版用預設值，其他城市在 data.js 的 TRIP.cfg 覆寫
+  const C = Object.assign({
+    key: 'tokyo', center: [35.6812, 139.7671], tz: 'Asia/Tokyo', city: '東京', host: 'tokyo-trip-2pc.pages.dev',
+    cur: 'JPY', sym: '¥', dec: 0, curName: '日圓', fxUnit: 100, fxBig: 10000, fxFallback: 0.2,
+    sunset: '16:50', airport: '成田', taxNewFrom: '2026-11-01', taxRate: 0.1, preTaxThreshold: true,
+  }, T.cfg || {});
+  const K = (s) => `${C.key}.${s}`;
+  const TOKYO = C.center;
   const NDAYS = T.days.length;
 
   /* ---------- 雲端同步：購物紀錄、待辦打勾、出發日（需編輯密碼） ---------- */
-  const SYNC = { ledger: 'tokyo.ledger', checks: 'tokyo.checks', start: 'tokyo.start', shared: 'tokyo.shared', people: 'tokyo.people' };
+  const SYNC = { ledger: K('ledger'), checks: K('checks'), start: K('start'), shared: K('shared'), people: K('people') };
   const SYNC_DEFAULT = { ledger: '[]', checks: '{}', shared: '[]', people: '["我","同伴"]' };
   const mergeList = (a, b) => { const m = new Map(); [...a, ...b].forEach((e) => { const o = m.get(e.id); if (!o || (e.m || 0) > (o.m || 0)) m.set(e.id, e); }); return [...m.values()].sort((x, y) => x.id - y.id); };
-  const cloudKey = () => localStorage.getItem('tokyo.editkey') || '';
+  const cloudKey = () => localStorage.getItem(K('editkey')) || '';
   const cloudTimers = {};
   function cloudPush(k) {
-    try { localStorage.setItem('tokyo.u.' + k, String(Date.now())); } catch { return; }
+    try { localStorage.setItem(K('u.') + k, String(Date.now())); } catch { return; }
     if (!cloudKey()) return;
     clearTimeout(cloudTimers[k]);
     cloudTimers[k] = setTimeout(() => cloudSend(k).catch(() => {}), 700);
@@ -23,9 +30,9 @@
   async function cloudSend(k) {
     const raw = localStorage.getItem(SYNC[k]);
     const v = k === 'start' ? raw || '' : JSON.parse(raw || SYNC_DEFAULT[k]);
-    const r = await fetch('/api/store?k=' + k, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-edit-key': cloudKey() }, body: JSON.stringify({ v, u: +localStorage.getItem('tokyo.u.' + k) || Date.now() }) });
-    if (r.status === 401) localStorage.removeItem('tokyo.editkey');
-    if (r.ok && k === 'shared') { const d = await r.json(); shared = mergeList(shared, d.v || []); localStorage.setItem('tokyo.shared', JSON.stringify(shared)); renderExpenses(); }
+    const r = await fetch('/api/store?k=' + k, { method: 'PUT', headers: { 'content-type': 'application/json', 'x-edit-key': cloudKey() }, body: JSON.stringify({ v, u: +localStorage.getItem(K('u.') + k) || Date.now() }) });
+    if (r.status === 401) localStorage.removeItem(K('editkey'));
+    if (r.ok && k === 'shared') { const d = await r.json(); shared = mergeList(shared, d.v || []); localStorage.setItem(K('shared'), JSON.stringify(shared)); renderExpenses(); }
     return r.ok;
   }
   async function cloudPull() {
@@ -34,28 +41,28 @@
     for (const k of Object.keys(SYNC)) {
       try {
         const r = await fetch('/api/store?k=' + k, { headers: { 'x-edit-key': cloudKey() }, cache: 'no-store' });
-        if (r.status === 401) { localStorage.removeItem('tokyo.editkey'); renderCloudBar(); return; }
+        if (r.status === 401) { localStorage.removeItem(K('editkey')); renderCloudBar(); return; }
         if (!r.ok) continue;
         const c = await r.json();
-        const lu = +localStorage.getItem('tokyo.u.' + k) || 0;
+        const lu = +localStorage.getItem(K('u.') + k) || 0;
         if (k === 'shared') {
           const merged = mergeList(shared, c.v || []);
-          if (JSON.stringify(merged) !== JSON.stringify(shared)) { shared = merged; localStorage.setItem('tokyo.shared', JSON.stringify(shared)); renderExpenses(); }
+          if (JSON.stringify(merged) !== JSON.stringify(shared)) { shared = merged; localStorage.setItem(K('shared'), JSON.stringify(shared)); renderExpenses(); }
           if (JSON.stringify(merged) !== JSON.stringify(c.v || [])) await cloudSend(k);
           continue;
         }
         if (c.u && c.u > lu) {
           localStorage.setItem(SYNC[k], k === 'start' ? c.v : JSON.stringify(c.v));
-          localStorage.setItem('tokyo.u.' + k, String(c.u));
+          localStorage.setItem(K('u.') + k, String(c.u));
           if (k === 'people') { people = c.v; renderExpenses(); } else changed = true;
         } else if (lu > (c.u || 0) || (!c.u && localStorage.getItem(SYNC[k]))) {
-          if (!lu) localStorage.setItem('tokyo.u.' + k, String(Date.now()));
+          if (!lu) localStorage.setItem(K('u.') + k, String(Date.now()));
           await cloudSend(k);
         }
       } catch { /* 離線：下次再同步 */ }
     }
-    if (changed && !sessionStorage.getItem('tokyo.pulled')) { sessionStorage.setItem('tokyo.pulled', '1'); location.reload(); }
-    else sessionStorage.removeItem('tokyo.pulled');
+    if (changed && !sessionStorage.getItem(K('pulled'))) { sessionStorage.setItem(K('pulled'), '1'); location.reload(); }
+    else sessionStorage.removeItem(K('pulled'));
   }
   function renderCloudBar() {
     const el = $('#cloudBar'); if (!el) return;
@@ -63,14 +70,14 @@
     el.innerHTML = `<span class="cb-t">${on ? '☁️ 雲端同步已開啟' : '☁️ 雲端同步未開啟'}<small>${on ? '購物紀錄、待辦打勾、出發日、行程修改都會同步，重新整理不會消失' : '輸入編輯密碼後，購物紀錄、待辦打勾、出發日會存到雲端'}</small></span>
       <button class="btn sm" id="cloudBtn" type="button">${on ? '關閉' : '開啟'}</button>`;
     $('#cloudBtn').addEventListener('click', async () => {
-      if (on) { localStorage.removeItem('tokyo.editkey'); renderCloudBar(); return; }
+      if (on) { localStorage.removeItem(K('editkey')); renderCloudBar(); return; }
       const key = (prompt('輸入編輯密碼') || '').trim();
       if (!key) return;
       try {
         const r = await fetch('/api/store?k=checks', { headers: { 'x-edit-key': key }, cache: 'no-store' });
         if (r.status === 401) return alert('編輯密碼不正確');
-        if (!r.ok) return alert('這個網址不支援雲端同步（請用 tokyo-trip-2pc.pages.dev）');
-        localStorage.setItem('tokyo.editkey', key);
+        if (!r.ok) return alert(`這個網址不支援雲端同步（請用 ${C.host}）`);
+        localStorage.setItem(K('editkey'), key);
         renderCloudBar();
         cloudPull();
       } catch { alert('網路有問題，稍後再試'); }
@@ -78,7 +85,7 @@
   }
 
   /* ---------- 行程編輯：雲端存檔（Cloudflare KV），本機留一份快取 ---------- */
-  const EDITS_KEY = 'tokyo.edits';
+  const EDITS_KEY = K('edits');
   const escH = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ORIG = T.days.map((d) => d.stops.map((s) => ({ ...s })));
   function applyEdits(doc) {
@@ -108,6 +115,7 @@
   const DAY_COLORS = ['#ff453a', '#ff9f0a', '#32ade6', '#0a84ff', '#5e5ce6', '#bf5af2', '#a2845e']; // Apple 系統色，七天各一色
   const FOOD_COLOR = '#30b158';
   const GEM_COLOR = '#ff2d92';
+  const MOTO_COLOR = '#5e5ce6';
   
   /* ---------- 小工具 ---------- */
   // 有 q（店名＋地址）就用文字導航：日本店家的座標只是概略位置，文字查詢比座標準
@@ -135,8 +143,8 @@
   };
 
   const store = {
-    get start() { return localStorage.getItem('tokyo.start') || T.start || ''; },
-    set start(v) { localStorage.setItem('tokyo.start', v); cloudPush('start'); },
+    get start() { return localStorage.getItem(K('start')) || T.start || ''; },
+    set start(v) { localStorage.setItem(K('start'), v); cloudPush('start'); },
   };
   const addDays = (iso, n) => {
     const d = new Date(iso + 'T12:00:00');
@@ -186,7 +194,7 @@
       if (p.id === 'plan' && dayMap) fitDay();
       if (p.id === 'map' && bigMap) { bigMap.invalidateSize(); if (!bigMap._fitted) { bigMap.fitBounds(bigBounds, { padding: [30, 30] }); bigMap._fitted = true; } }
     });
-    if (i > 0) localStorage.setItem('tokyo.swiped', '1');
+    if (i > 0) localStorage.setItem(K('swiped'), '1');
   }
   // 滑動時依捲動位置判斷現在在哪一頁
   let raf;
@@ -210,7 +218,7 @@
     if (e.key === 'ArrowRight') goTo(cur + 1);
     if (e.key === 'ArrowLeft') goTo(cur - 1);
   });
-  if (localStorage.getItem('tokyo.swiped')) $('#swipeHint').hidden = true;
+  if (localStorage.getItem(K('swiped'))) $('#swipeHint').hidden = true;
 
   /* ---------- 動畫：分頁指示器、捲動浮現、數字跳動 ---------- */
   // 上方分頁列和底部分頁列各放一顆會滑動的指示器，位置跟著目前那一頁
@@ -297,9 +305,9 @@
   });
 
   $('#stats').innerHTML = `
-    <div class="stat live"><div class="k">東京時間</div><div class="v mono" id="tJp">--:--</div><div class="s" id="tJpD"></div></div>
+    <div class="stat live"><div class="k">${C.city}時間</div><div class="v mono" id="tJp">--:--</div><div class="s" id="tJpD"></div></div>
     <div class="stat live"><div class="k">台北時間</div><div class="v mono" id="tTpe">--:--</div><div class="s" id="tDiff"></div></div>
-    <div class="stat live"><div class="k">日圓 → 台幣</div><div class="v" id="fx">—</div><div class="s" id="fxS">讀取匯率中…</div></div>
+    <div class="stat live"><div class="k">${C.curName} → 台幣</div><div class="v" id="fx">—</div><div class="s" id="fxS">讀取匯率中…</div></div>
     <div class="stat"><div class="k">出發倒數</div><div class="v" id="cd">—</div><div class="s" id="cdS"></div></div>
     <div class="stat wide wxcard"><div class="k">旅行期間天氣</div><div id="wxTrip" class="wx-trip"></div><div class="s" id="wxNowS">讀取天氣中…</div></div>`;
 
@@ -311,11 +319,11 @@
   function tick() {
     const now = new Date();
     const t = (tz) => now.toLocaleTimeString('zh-TW', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
-    $('#tJp').textContent = t('Asia/Tokyo');
+    $('#tJp').textContent = t(C.tz);
     $('#tTpe').textContent = t('Asia/Taipei');
-    $('#tJpD').textContent = now.toLocaleDateString('zh-TW', { timeZone: 'Asia/Tokyo', month: 'long', day: 'numeric', weekday: 'short' });
-    const diff = (tzOffsetMin('Asia/Tokyo') - tzOffsetMin('Asia/Taipei')) / 60;
-    $('#tDiff').textContent = `東京比台北快 ${diff} 小時`;
+    $('#tJpD').textContent = now.toLocaleDateString('zh-TW', { timeZone: C.tz, month: 'long', day: 'numeric', weekday: 'short' });
+    const diff = (tzOffsetMin(C.tz) - tzOffsetMin('Asia/Taipei')) / 60;
+    $('#tDiff').textContent = diff === 0 ? `${C.city}和台北同時區` : `${C.city}比台北${diff > 0 ? '快' : '慢'} ${Math.abs(diff)} 小時`;
     const s = store.start;
     if (s) {
       const days = Math.ceil((new Date(s + 'T00:00:00') - now) / 864e5);
@@ -329,17 +337,17 @@
       $('#cdS').textContent = '選出發日';
     }
   }
-  const FX = { rate: 0.2 }; // 日圓→台幣，讀不到即時匯率時用概估
+  const FX = { rate: C.fxFallback }; // 當地貨幣→台幣，讀不到即時匯率時用概估
   async function loadFx() {
     try {
-      const j = await (await fetch('https://open.er-api.com/v6/latest/JPY')).json();
+      const j = await (await fetch(`https://open.er-api.com/v6/latest/${C.cur}`)).json();
       const v = j.rates.TWD;
       FX.rate = v;
-      countUp($('#fx'), v * 100, (x) => `¥100＝${x.toFixed(1)}`);
-      $('#fxS').textContent = `¥10,000 ≈ NT$${Math.round(v * 10000).toLocaleString()}`;
+      countUp($('#fx'), v * C.fxUnit, (x) => `${C.sym}${C.fxUnit}＝${x.toFixed(1)}`);
+      $('#fxS').textContent = `${C.sym}${C.fxBig.toLocaleString()} ≈ NT$${Math.round(v * C.fxBig).toLocaleString()}`;
       renderLedger();
     } catch {
-      $('#fx').textContent = '¥100≈20';
+      $('#fx').textContent = `${C.sym}${C.fxUnit}≈${Math.round(C.fxFallback * C.fxUnit)}`;
       $('#fxS').textContent = '離線概估';
     }
   }
@@ -472,10 +480,19 @@
     });
     bigBounds = L.latLngBounds(all);
 
+    (T.scooter ? T.scooter.shops : []).forEach((x) => {
+      if (x.lat) add('moto', L.marker([x.lat, x.lng], { icon: pinIcon(MOTO_COLOR, 'M') }).bindPopup(popup(x.name, x.price, x)), [x.lat, x.lng]);
+    });
+    (T.scooter ? T.scooter.routes : []).forEach((r) => {
+      const ll = r.points.map((x) => x.split(',').map(Number));
+      add('ride', L.polyline(ll, { color: MOTO_COLOR, weight: 4, opacity: .8, dashArray: '2 8' }).bindPopup(`<b>${r.name}</b><br>${r.km}`));
+    });
     const filters = [
       ...T.days.map((d, i) => ({ k: `d${i}`, label: `Day ${i + 1}`, c: DAY_COLORS[i] })),
       { k: 'food', label: '名店', c: FOOD_COLOR },
       { k: 'gem', label: '隱藏美食', c: GEM_COLOR },
+      { k: 'moto', label: '租車行', c: MOTO_COLOR },
+      { k: 'ride', label: '騎車路線', c: MOTO_COLOR },
     ].filter((f) => groups[f.k]);
     $('#mapFilters').innerHTML = filters.map((f) => `<button class="chip on" data-k="${f.k}"><i style="background:${f.c}"></i>${f.label}</button>`).join('');
     $$('#mapFilters .chip').forEach((b) => b.addEventListener('click', () => {
@@ -522,7 +539,7 @@
   /* ---------- 指南：交通／租機車／須知 ---------- */
   let guidePane = 'book';
   function renderGuideSeg() {
-    seg($('#guideSeg'), [{ k: 'book', label: '🎫 訂票' }, { k: 'transport', label: '🚇 交通' }, { k: 'tips', label: 'ℹ️ 須知' }], guidePane, (k) => {
+    seg($('#guideSeg'), [{ k: 'book', label: '🎫 訂票' }, { k: 'transport', label: '🚇 交通' }, ...(T.scooter ? [{ k: 'scooter', label: '🛵 機車' }] : []), { k: 'tips', label: 'ℹ️ 須知' }], guidePane, (k) => {
       guidePane = k;
       $$('.guide-pane').forEach((p) => (p.hidden = p.dataset.pane !== k));
       renderGuideSeg();
@@ -536,6 +553,28 @@
       `<h2 class="h2">市區票種</h2>` + table(['票種', '價格', '說明'], t.tickets, [1]) +
       `<h2 class="h2">怎麼搭</h2>` + cards(t.cards) +
       (t.src ? `<p class="src">來源：${t.src}</p>` : '');
+  }
+  function renderScooter() {
+    const s = T.scooter;
+    $('#scooterBody').innerHTML = s.callouts.map(callout).join('') +
+      cards(s.cards) +
+      `<h2 class="h2">租車行</h2>` +
+      `<div class="grid g3">${s.shops.map((x) => `
+        <article class="card food">
+          <div class="top-row"><h3>${x.name}</h3>${x.badge ? `<span class="pill info">${x.badge}</span>` : ''}</div>
+          <div class="area">${x.area || ''}</div>
+          <dl class="facts"><dt>價格</dt><dd>${x.price}</dd>${x.deposit ? `<dt>押金</dt><dd>${x.deposit}</dd>` : ''}<dt>地址</dt><dd>${x.addr}</dd></dl>
+          ${x.note ? `<div class="fnote">${x.note}</div>` : ''}
+          <div class="foot">${navBtn(x, 'walking')}${x.url ? `<a class="navlink ghost" target="_blank" rel="noopener" href="${x.url}">官網</a>` : ''}</div>
+        </article>`).join('')}</div>` +
+      `<h2 class="h2">推薦騎乘路線</h2>` +
+      `<div class="grid g2">${s.routes.map((r) => {
+        const p = r.points;
+        const url = `https://www.google.com/maps/dir/?api=1&origin=${p[0]}&destination=${p.at(-1)}&waypoints=${p.slice(1, -1).slice(0, 8).join('|')}&travelmode=driving`;
+        return `<div class="card"><h3>${r.name}</h3><div class="area">${r.km}</div>${list(r.desc)}
+          <div style="margin-top:12px"><a class="btn primary sm" target="_blank" rel="noopener" href="${url}">➜ 機車導航整條路線</a></div></div>`;
+      }).join('')}</div>` +
+      (s.src ? `<p class="src">來源：${s.src}</p>` : '');
   }
   function renderTips() {
     $('#tipsBody').innerHTML = (T.tipsCallouts || []).map(callout).join('') + cards(T.tips);
@@ -551,7 +590,7 @@
     const climate = T.climateNote;
     try {
       if (!wxCache) {
-        const u = `https://api.open-meteo.com/v1/forecast?latitude=${TOKYO[0]}&longitude=${TOKYO[1]}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo&forecast_days=16`;
+        const u = `https://api.open-meteo.com/v1/forecast?latitude=${TOKYO[0]}&longitude=${TOKYO[1]}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=${encodeURIComponent(C.tz)}&forecast_days=16`;
         wxCache = await (await fetch(u)).json();
       }
       const w = wxCache;
@@ -563,11 +602,11 @@
           return `<div class="wxm"><span class="dd">${fmtShort(new Date(w.daily.time[k] + 'T12:00:00'))}</span><span class="ic">${i2}</span>
             <b>${Math.round(w.daily.temperature_2m_max[k])}°</b><span class="lo">${Math.round(w.daily.temperature_2m_min[k])}°</span><span class="rr">💧${w.daily.precipitation_probability_max[k] ?? '-'}%</span></div>`;
         }).join('');
-        $('#wxNowS').textContent = `東京現在 ${ic} ${Math.round(w.current.temperature_2m)}°（${txt}）`;
+        $('#wxNowS').textContent = `${C.city}現在 ${ic} ${Math.round(w.current.temperature_2m)}°（${txt}）`;
       } else {
         $('#wxTrip').innerHTML = `<div class="wx-sum"><span class="ic">🌦️</span><div><b>${climate.temp}</b><br><span>${climate.rain}</span></div></div>`;
         const from = store.start ? fmtDay(addDays(store.start, -15)) : '';
-        $('#wxNowS').textContent = `東京現在 ${ic} ${Math.round(w.current.temperature_2m)}°${from ? `・${from} 起顯示行程日預報` : ''}`;
+        $('#wxNowS').textContent = `${C.city}現在 ${ic} ${Math.round(w.current.temperature_2m)}°${from ? `・${from} 起顯示行程日預報` : ''}`;
       }
     } catch {
       $('#wxTrip').innerHTML = `<div class="wx-sum"><span class="ic">🌦️</span><div><b>${climate.temp}</b><br><span>${climate.rain}</span></div></div>`;
@@ -576,8 +615,8 @@
   }
 
   /* ---------- 總覽：待辦／注意事項／行李（打勾存在 localStorage） ---------- */
-  const checks = JSON.parse(localStorage.getItem('tokyo.checks') || '{}');
-  const saveChecks = () => { localStorage.setItem('tokyo.checks', JSON.stringify(checks)); cloudPush('checks'); };
+  const checks = JSON.parse(localStorage.getItem(K('checks')) || '{}');
+  const saveChecks = () => { localStorage.setItem(K('checks'), JSON.stringify(checks)); cloudPush('checks'); };
   const linkBtns = (links = []) => links.map(([label, url]) =>
     `<a class="navlink ${label.startsWith('🎫') || label.startsWith('📝') ? 'book' : 'ghost'}" target="_blank" rel="noopener" href="${url}">${label}</a>`).join('');
   function renderTodo() {
@@ -640,7 +679,8 @@
 
   /* ---------- 購物：退稅指南＋購物紀錄核對 ---------- */
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const yen = (n) => '¥' + Math.round(n).toLocaleString('en-US');
+  const rnd = (n) => Math.round(n * 10 ** C.dec) / 10 ** C.dec;
+  const yen = (n) => C.sym + rnd(n).toLocaleString('en-US', { minimumFractionDigits: C.dec, maximumFractionDigits: C.dec });
   const twd = (n) => 'NT$' + Math.round(n * FX.rate).toLocaleString('en-US');
   const regimeOf = (iso) => T.tax.regimes.find((r) => iso >= r.from && iso <= r.to);
   const OKPILL = { yes: ['可退稅', 'ok'], partial: ['部分／看店', 'warn'], no: ['多半不行', 'bad'], unknown: ['未查證', ''] };
@@ -684,7 +724,7 @@
   }
 
   // ---- 購物紀錄：存在這台裝置的 localStorage；開啟雲端同步後會同步到 Cloudflare KV（需密碼） ----
-  const LEDGER_KEY = 'tokyo.ledger';
+  const LEDGER_KEY = K('ledger');
   let ledger = [];
   try { ledger = JSON.parse(localStorage.getItem(LEDGER_KEY) || '[]'); } catch { ledger = []; }
   const saveLedger = () => { try { localStorage.setItem(LEDGER_KEY, JSON.stringify(ledger)); cloudPush('ledger'); } catch { /* 無痕模式存不了就只留在記憶體 */ } };
@@ -701,7 +741,7 @@
           <label>日期<select class="in" id="lfDate">${opts}</select></label>
           <label>店家<input class="in" id="lfStore" list="lfShops" placeholder="例如 唐吉訶德" autocomplete="off" /></label>
           <label>買了什麼<input class="in" id="lfItem" placeholder="例如 藥妝、伴手禮" /></label>
-          <label>含稅金額（日圓）<input class="in" id="lfAmt" type="number" inputmode="numeric" min="0" step="1" placeholder="例如 5400" /></label>
+          <label>含稅金額（${C.curName}）<input class="in" id="lfAmt" type="number" inputmode="decimal" min="0" step="${C.dec ? 0.01 : 1}" placeholder="例如 ${C.dec ? 89.9 : 5400}" /></label>
           <label>付款方式<select class="in" id="lfPay">${(T.payments || []).map((x) => `<option>${esc(x)}</option>`).join('')}</select></label>
           <label>類別<select class="in" id="lfKind"><option>一般物品</option><option>消耗品（食品、藥妝）</option></select></label>
         </div>
@@ -756,10 +796,12 @@
     const gr = Object.values(g).sort((a, b) => a.date.localeCompare(b.date)).map((x) => {
       const r = regimeOf(x.date);
       const min = r ? r.min : 0;
-      const pre = Math.round(x.sum / 1.1); // 官方門檻看「未稅」金額；以 10% 稅粗估（外帶食品 8% 會略有差異）
-      return [esc(x.store), x.date.slice(5).replace('-', '/'), `${yen(x.sum)}（未稅約 ${yen(pre)}）`, r ? `${r.name}：${pre >= min ? '✅ 已達 ' + yen(min) : '未稅還差約 ' + yen(min - pre)}` : '—'];
+      // 日本門檻看「未稅」金額（以 10% 粗估）；義大利等門檻看含稅總額
+      const pre = C.preTaxThreshold ? rnd(x.sum / (1 + C.taxRate)) : x.sum;
+      const lbl = C.preTaxThreshold ? '未稅' : '含稅';
+      return [esc(x.store), x.date.slice(5).replace('-', '/'), C.preTaxThreshold ? `${yen(x.sum)}（未稅約 ${yen(pre)}）` : yen(x.sum), r ? `${r.name}：${pre >= min ? '✅ 已達 ' + yen(min) : lbl + '還差約 ' + yen(min - pre)}` : '—'];
     });
-    const sumHtml = gr.length ? `<h2 class="h2">同店同日合計 vs 退稅門檻</h2><p class="sub">各店門檻與規則見「退稅指南」，這裡用「同一家店、同一天」的合計，換成未稅金額粗略判斷。</p>${table(['店家', '日期', '合計', '門檻'], gr, [1, 2])}` : '';
+    const sumHtml = gr.length ? `<h2 class="h2">同店同日合計 vs 退稅門檻</h2><p class="sub">各店門檻與規則見「退稅指南」，這裡用「同一家店、同一天」的合計，${C.preTaxThreshold ? '換成未稅金額粗略判斷' : '用含稅總額判斷'}。</p>${table(['店家', '日期', '合計', '門檻'], gr, [1, 2])}` : '';
 
     const rows = [...ledger].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
     box.innerHTML = sumHtml + (rows.length ? `<h2 class="h2">全部紀錄</h2><div class="ledger-list">${rows.map((e) => `
@@ -787,11 +829,11 @@
     const csv = $('#lgCsv');
     if (csv) csv.addEventListener('click', () => {
       const q = (v) => `"${String(v ?? '').replace(/^[=+\-@\t\r]/, "'$&").replace(/"/g, '""')}"`;
-      const lines = [['日期', '店家', '品項', '含稅金額(日圓)', '付款方式', '類別', '收據', '已辦退稅', '已核對'].map(q).join(',')]
+      const lines = [['日期', '店家', '品項', `含稅金額(${C.curName})`, '付款方式', '類別', '收據', '已辦退稅', '已核對'].map(q).join(',')]
         .concat(ledger.map((e) => [e.date, e.store, e.item, e.amt, e.pay, e.kind, e.rcpt ? '有' : '', e.tax ? '是' : '', e.chk ? '是' : ''].map(q).join(',')));
       const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = 'tokyo-shopping.csv'; a.click();
+      a.href = URL.createObjectURL(blob); a.download = `${C.key}-shopping.csv`; a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     });
     const clr = $('#lgClear');
@@ -899,7 +941,7 @@
       body.innerHTML = `<div class="day-intro"><h2 class="h2" style="margin-top:0">✏️ 編輯 Day ${i + 1}</h2>
         <p>每一站有「開始時間、停留、到下一站的交通」，改任何一個，<b>後面的時間會自動重算</b>。新增、刪除、換順序也一樣。</p>
         <p class="ed-warn">⚠️ 標「估」的交通時間是用兩站<b>直線距離</b>推算的（走路 15 分鐘內算走路，其餘算搭電車），不是查詢實際班次，<b>不保證準確</b>。新增的景點要輸入名稱後才會去找位置、估算；出發前請用 Google 地圖的「導航」按鈕再確認，實際時間可以自己改，改過的不會被覆蓋。</p></div>
-        <label class="ed-cas"><input type="checkbox" id="edCas" ${localStorage.getItem('tokyo.cascade') === '0' ? '' : 'checked'}> 自動重算後面的時間（停留＋交通）</label>
+        <label class="ed-cas"><input type="checkbox" id="edCas" ${localStorage.getItem(K('cascade')) === '0' ? '' : 'checked'}> 自動重算後面的時間（停留＋交通）</label>
         <div class="ed-list">${rows.map((r, k) => {
           const end = toMin(r.t) !== null ? fromMin(toMin(r.t) + r.stay) : '';
           return `<div class="ed-row" data-k="${k}">
@@ -925,15 +967,15 @@
       if (nv !== r.note) { r.note = nv; r.noteText = nv; }
     });
     const send = async (payload) => {
-      let key = localStorage.getItem('tokyo.editkey') || '';
+      let key = localStorage.getItem(K('editkey')) || '';
       if (!key) { key = (prompt('輸入編輯密碼') || '').trim(); if (!key) { msg('需要編輯密碼才能存檔', true); return false; } }
       msg('儲存中…');
       try {
         const r = await fetch('/api/plan', { method: 'PUT', headers: { 'content-type': 'application/json', 'x-edit-key': key }, body: JSON.stringify({ day: i, ...payload }) });
-        if (r.status === 401) { localStorage.removeItem('tokyo.editkey'); msg('編輯密碼不正確', true); return false; }
-        if (!r.ok) { msg(r.status === 405 || r.status === 404 ? '這個網址不能存檔，請改用 tokyo-trip-2pc.pages.dev' : '存檔失敗（' + r.status + '）', true); return false; }
+        if (r.status === 401) { localStorage.removeItem(K('editkey')); msg('編輯密碼不正確', true); return false; }
+        if (!r.ok) { msg(r.status === 405 || r.status === 404 ? `這個網址不能存檔，請改用 ${C.host}` : '存檔失敗（' + r.status + '）', true); return false; }
         const saved = await r.json();
-        try { localStorage.setItem('tokyo.editkey', key); localStorage.setItem(EDITS_KEY, JSON.stringify(saved)); } catch { /* 無痕模式：已存到雲端，只是沒快取 */ }
+        try { localStorage.setItem(K('editkey'), key); localStorage.setItem(EDITS_KEY, JSON.stringify(saved)); } catch { /* 無痕模式：已存到雲端，只是沒快取 */ }
         return true;
       } catch { msg('網路有問題，沒存到', true); return false; }
     };
@@ -941,7 +983,7 @@
     // 新景點：AI 轉成日文正式名稱＋寫介紹＋建議停留，再找離前後站最近的座標，重算前後交通
     const near = (r) => { const k = rows.indexOf(r); return { k, prev: rows[k - 1], next: rows[k + 1] }; };
     async function lookup(r, quiet) {
-      const key = localStorage.getItem('tokyo.editkey');
+      const key = localStorage.getItem(K('editkey'));
       if (!key) { if (!quiet) msg('名稱已改。開啟雲端同步後，會自動找位置、寫介紹、估算交通時間。'); return; }
       const ask = r.name;
       if (!quiet) msg(`AI 正在查「${ask}」…（約 10–30 秒）`);
@@ -968,7 +1010,7 @@
     }
     body.onchange = async (e) => {
       const t = e.target;
-      if (t.id === 'edCas') { localStorage.setItem('tokyo.cascade', t.checked ? '1' : '0'); return; }
+      if (t.id === 'edCas') { localStorage.setItem(K('cascade'), t.checked ? '1' : '0'); return; }
       const row = t.closest('.ed-row');
       if (!row) return;
       sync();
@@ -1069,11 +1111,11 @@
       const doc = JSON.parse(t);
       const now = JSON.stringify({ days: doc.days || {} });
       const was = JSON.stringify({ days: cachedEdits.days || {} });
-      if (now !== was && !sessionStorage.getItem('tokyo.syncing')) {
+      if (now !== was && !sessionStorage.getItem(K('syncing'))) {
         localStorage.setItem(EDITS_KEY, t);
-        sessionStorage.setItem('tokyo.syncing', '1');
+        sessionStorage.setItem(K('syncing'), '1');
         location.reload();
-      } else sessionStorage.removeItem('tokyo.syncing');
+      } else sessionStorage.removeItem(K('syncing'));
     } catch { /* 離線或不在 Cloudflare 網址：用本機快取 */ }
   }
 
@@ -1103,18 +1145,18 @@
   /* ---------- 記帳：共同分帳（雲端合併）＋ 私人支出（只存這支手機） ---------- */
   const EXP_CATS = ['餐飲', '交通', '購物', '門票', '住宿', '其他'];
   const loadJ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
-  let people = loadJ('tokyo.people', null);
+  let people = loadJ(K('people'), null);
   if (!Array.isArray(people) || !people.length) people = ['我', '同伴'];
-  let shared = loadJ('tokyo.shared', []);
+  let shared = loadJ(K('shared'), []);
   if (!Array.isArray(shared)) shared = [];
-  let priv = loadJ('tokyo.private', []);
+  let priv = loadJ(K('private'), []);
   if (!Array.isArray(priv)) priv = [];
-  let meName = localStorage.getItem('tokyo.me');
+  let meName = localStorage.getItem(K('me'));
   if (!people.includes(meName)) meName = people[0];
   const draft = { vis: 'shared', payer: meName, split: new Set(people) };
-  const savePeople = () => { localStorage.setItem('tokyo.people', JSON.stringify(people)); cloudPush('people'); };
-  const saveShared = () => { localStorage.setItem('tokyo.shared', JSON.stringify(shared)); cloudPush('shared'); };
-  const savePriv = () => localStorage.setItem('tokyo.private', JSON.stringify(priv));
+  const savePeople = () => { localStorage.setItem(K('people'), JSON.stringify(people)); cloudPush('people'); };
+  const saveShared = () => { localStorage.setItem(K('shared'), JSON.stringify(shared)); cloudPush('shared'); };
+  const savePriv = () => localStorage.setItem(K('private'), JSON.stringify(priv));
 
   function settle() {
     const bal = {};
@@ -1126,17 +1168,18 @@
       sp.forEach((n) => add(n, -e.amt / sp.length));
     });
     const cr = [], de = [];
-    const rb = Object.fromEntries(Object.entries(bal).map(([n, v]) => [n, Math.round(v)]));
+    const F = 10 ** C.dec;
+    const rb = Object.fromEntries(Object.entries(bal).map(([n, v]) => [n, Math.round(v * F)]));
     const drift = Object.values(rb).reduce((a, v) => a + v, 0);
     if (drift) { const top = Object.keys(rb).sort((a, b) => rb[b] - rb[a])[0]; rb[top] -= drift; }
-    Object.keys(bal).forEach((n) => { bal[n] = rb[n]; });
+    Object.keys(bal).forEach((n) => { bal[n] = rb[n] / F; });
     Object.entries(rb).forEach(([n, r]) => { if (r > 0) cr.push([n, r]); else if (r < 0) de.push([n, -r]); });
     cr.sort((a, b) => b[1] - a[1]); de.sort((a, b) => b[1] - a[1]);
     const tx = [];
     let i = 0, j = 0;
     while (i < cr.length && j < de.length) {
       const m = Math.min(cr[i][1], de[j][1]);
-      tx.push({ from: de[j][0], to: cr[i][0], amt: m });
+      tx.push({ from: de[j][0], to: cr[i][0], amt: m / F });
       cr[i][1] -= m; de[j][1] -= m;
       if (!cr[i][1]) i++;
       if (!de[j][1]) j++;
@@ -1164,7 +1207,7 @@
       ${live.length ? `<table class="ex-tb"><tr><th>人</th><th>先付</th><th>應分攤</th><th>差額</th></tr>${Object.keys(bal).map((n) => {
         const paid = live.filter((e) => e.payer === n).reduce((a, e) => a + e.amt, 0);
         const owe = paid - bal[n];
-        return `<tr><td>${esc(n)}</td><td>${yen(paid)}</td><td>${yen(Math.round(owe))}</td><td class="${bal[n] >= 0 ? 'pos' : 'neg'}">${bal[n] >= 0 ? '+' : '−'}${yen(Math.abs(Math.round(bal[n])))}</td></tr>`;
+        return `<tr><td>${esc(n)}</td><td>${yen(paid)}</td><td>${yen(rnd(owe))}</td><td class="${bal[n] >= 0 ? 'pos' : 'neg'}">${bal[n] >= 0 ? '+' : '−'}${yen(Math.abs(rnd(bal[n])))}</td></tr>`;
       }).join('')}</table>
       ${tx.length ? `<div class="ex-tx">${tx.map((t) => `<div>👉 <b>${esc(t.from)}</b> 付給 <b>${esc(t.to)}</b> <b>${yen(t.amt)}</b>（${twd(t.amt)}）</div>`).join('')}</div>` : '<p class="src">目前沒有人欠錢，帳是平的。</p>'}` : '<p class="src">還沒有共同支出。</p>'}</div>`;
     // 清單
@@ -1189,7 +1232,7 @@
           <label>日期<select class="in" id="exDate">${opts}</select></label>
           <label>類別<select class="in" id="exCat">${EXP_CATS.map((c) => `<option>${c}</option>`).join('')}</select></label>
           <label>項目<input class="in" id="exTitle" placeholder="例如 午餐、地鐵" autocomplete="off"></label>
-          <label>金額（日圓）<input class="in" id="exAmt" type="number" inputmode="numeric" min="1" step="1" placeholder="例如 3200"></label>
+          <label>金額（${C.curName}）<input class="in" id="exAmt" type="number" inputmode="decimal" min="0" step="${C.dec ? 0.01 : 1}" placeholder="例如 ${C.dec ? 24.5 : 3200}"></label>
         </div>
         <div class="day-actions">${scanBtn('exScan')}<button class="btn primary" id="exAdd" type="button">＋ 花下去！</button></div>
         <p class="src" id="exHint"></p></div>
@@ -1204,7 +1247,7 @@
       const pe = e.target.closest('#exPeople [data-p]');
       if (pe) {
         const n = pe.dataset.p;
-        if (n !== meName) { meName = n; localStorage.setItem('tokyo.me', n); draft.payer = n; renderExpenses(); return; }
+        if (n !== meName) { meName = n; localStorage.setItem(K('me'), n); draft.payer = n; renderExpenses(); return; }
         const nv = (prompt(`「${n}」改名？輸入新名字；輸入「刪除」可移除這位旅伴。`, n) || '').trim();
         if (!nv || nv === n) return;
         if (nv === '刪除') {
@@ -1216,7 +1259,7 @@
           people = people.map((x) => (x === n ? nv : x));
           shared.forEach((x) => { if (x.payer === n || (x.split || []).includes(n)) { x.payer = x.payer === n ? nv : x.payer; x.split = (x.split || []).map((y) => (y === n ? nv : y)); x.m = Date.now(); } });
           if (draft.split.delete(n)) draft.split.add(nv);
-          meName = nv; draft.payer = nv; localStorage.setItem('tokyo.me', nv); saveShared();
+          meName = nv; draft.payer = nv; localStorage.setItem(K('me'), nv); saveShared();
         }
         savePeople(); renderExpenses(); return;
       }
@@ -1234,7 +1277,7 @@
         renderExpenses(); return;
       }
       if (e.target.closest('#exAdd')) {
-        const title = $('#exTitle').value.trim(), amt = Math.round(Number($('#exAmt').value));
+        const title = $('#exTitle').value.trim(), amt = rnd(Number($('#exAmt').value));
         const hint = (t) => { $('#exHint').innerHTML = t; };
         if (!title || !(amt > 0)) return hint('項目和金額要填，金額要大於 0。');
         const base = { id: Date.now(), m: Date.now(), date: $('#exDate').value, cat: $('#exCat').value, title: title.slice(0, 40), amt };
@@ -1266,7 +1309,7 @@
 
   /* ---------- 行程檢查：用已查證的營業時間做規則計算（不靠 AI、不編造） ---------- */
   // m＝景點名稱關鍵字；o 開、c 關、last 最後入場；cw 某星期的關門時間（0=日…6=六）；closed 公休星期；out 戶外
-  const HOURS = [
+  const HOURS = C.hours || [
     { m: '巢鴨地藏通', o: '10:00', c: '18:00', out: 1, note: '有些攤位 16:00 就收' },
     { m: '竹下通', out: 1 },
     { m: 'SHIBUYA SKY', o: '10:00', c: '22:30', last: '21:20' },
@@ -1287,7 +1330,7 @@
     { m: '最後採買', o: '10:30', c: '23:00' },
     { m: '目黑川', out: 1 }, { m: '江之島', out: 1 }, { m: '鎌倉高校前站', out: 1 }, { m: '日光東照宮', out: 1 },
   ];
-  const SUNSET = '16:50'; // 10/29–11/4 約 16:43–16:52，取近似值
+  const SUNSET = C.sunset; // 10/29–11/4 約 16:43–16:52，取近似值
   const WD = ['日', '一', '二', '三', '四', '五', '六'];
   function checkDay(i) {
     const d = T.days[i], out = [];
@@ -1328,9 +1371,9 @@
     }
     if (i === NDAYS - 1) {
       const fly = d.stops.find((s) => /起飛/.test(plain(s.name)));
-      const ap = d.stops.find((s) => /成田機場/.test(plain(s.name)) && !/前往/.test(plain(s.name)));
-      if (fly && ap && toMin(fly.t) !== null && toMin(ap.t) !== null && toMin(fly.t) - toMin(ap.t) < 150) add('warn', d.stops.indexOf(ap), `${ap.t} 才到成田，離起飛 ${fly.t} 不到 2.5 小時；11/1 起買的免稅品要先辦退稅再託運，建議再提早。`);
-      const late = ledger.filter((e) => e.date >= '2026-11-01' && !e.tax);
+      const ap = d.stops.find((s) => new RegExp(`${C.airport}機場`).test(plain(s.name)) && !/前往/.test(plain(s.name)));
+      if (fly && ap && toMin(fly.t) !== null && toMin(ap.t) !== null && toMin(fly.t) - toMin(ap.t) < 150) add('warn', d.stops.indexOf(ap), `${ap.t} 才到${C.airport}，離起飛 ${fly.t} 不到 2.5 小時；11/1 起買的免稅品要先辦退稅再託運，建議再提早。`);
+      const late = C.taxNewFrom ? ledger.filter((e) => e.date >= C.taxNewFrom && !e.tax) : [];
       if (late.length) add('info', -1, `購物紀錄有 ${late.length} 筆 11/1 起買的還沒辦退稅：新制要在成田辦海關終端機，之後才能託運行李，要多留約 30 分鐘。`);
     }
     return { out, sunset: SUNSET, date: date ? `${date.getMonth() + 1}/${date.getDate()}（週${WD[date.getDay()]}）` : '' };
@@ -1346,7 +1389,7 @@
       <p class="src">營業時間來自本站已查證的資料，沒查到的景點不會檢查；公休與臨時休館請以官方為準。</p>
       <button class="btn sm" id="aiBtn" type="button">🤖 AI 建議</button><div class="ai-out" id="aiOut" role="status"></div></details>`;
     $('#aiBtn').addEventListener('click', async () => {
-      const out = $('#aiOut'), key = localStorage.getItem('tokyo.editkey');
+      const out = $('#aiOut'), key = localStorage.getItem(K('editkey'));
       if (!key) { out.textContent = '要先到「總覽」開啟雲端同步（輸入編輯密碼），才能用 AI。'; return; }
       out.textContent = 'AI 分析中…（約 10–20 秒）';
       try {
@@ -1371,7 +1414,7 @@
   function tokyoNow() {
     const q = new URLSearchParams(location.search).get('now'); // 測試用：?now=2026-10-29T10:30
     if (q && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(q)) return { date: q.slice(0, 10), min: +q.slice(11, 13) * 60 + +q.slice(14, 16) };
-    const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: C.tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
     return { date: `${p.year}-${p.month}-${p.day}`, min: +p.hour * 60 + +p.minute };
   }
   const tripDayIndex = () => {
@@ -1418,6 +1461,7 @@
   renderFood();
   renderGuideSeg();
   renderTransport();
+  if (T.scooter && $('#scooterBody')) renderScooter();
   renderTips();
   renderShopSeg();
   renderTaxPane();
